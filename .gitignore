@@ -11,6 +11,9 @@ var
 data/*.json
 *.log
 
+# Local Claude Code state (skills installs, etc.)
+.claude/skills/
+
 # Per-session working dirs (keep the README)
 groups/*
 !groups/README.md
