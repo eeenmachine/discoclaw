@@ -79,6 +79,7 @@ const outputFormat = (process.env.CLAUDE_OUTPUT_FORMAT ?? 'text') === 'stream-js
   ? 'stream-json'
   : 'text';
 const echoStdio = (process.env.CLAUDE_ECHO_STDIO ?? '0') === '1';
+const claudeDebugFile = (process.env.CLAUDE_DEBUG_FILE ?? '').trim() || null;
 
 // Debug: surface common "works in terminal but not in systemd" issues without logging secrets.
 if ((process.env.DISCOCLAW_DEBUG_RUNTIME ?? '0') === '1') {
@@ -117,6 +118,7 @@ const runtime = createClaudeCliRuntime({
   dangerouslySkipPermissions,
   outputFormat,
   echoStdio,
+  debugFile: claudeDebugFile,
 });
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));

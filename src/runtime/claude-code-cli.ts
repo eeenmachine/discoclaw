@@ -40,6 +40,8 @@ export type ClaudeCliRuntimeOpts = {
   outputFormat: 'text' | 'stream-json';
   // Echo raw CLI output for debugging / "terminal-like" Discord output.
   echoStdio?: boolean;
+  // If set, pass `--debug-file` to Claude CLI. Keep local; may contain sensitive info.
+  debugFile?: string | null;
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -58,6 +60,10 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     if (opts.dangerouslySkipPermissions) {
       args.push('--dangerously-skip-permissions');
+    }
+
+    if (opts.debugFile && opts.debugFile.trim()) {
+      args.push('--debug-file', opts.debugFile.trim());
     }
 
     if (params.sessionId) {
