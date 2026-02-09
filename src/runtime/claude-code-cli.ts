@@ -84,10 +84,11 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     }
 
     // Tool flags are runtime-specific; keep optional and configurable.
-    if (params.tools && params.tools.length > 0) {
+    // Note: treat an explicit empty list as "disable all tools" (claude expects --tools "").
+    if (params.tools) {
       // `--tools` accepts a comma-separated list for built-in tools.
       // We keep this simple; if we need finer control, add --allowedTools/--disallowedTools.
-      args.push('--tools', params.tools.join(','));
+      args.push('--tools', params.tools.length > 0 ? params.tools.join(',') : '');
     }
 
     args.push(params.prompt);

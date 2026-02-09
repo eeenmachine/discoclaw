@@ -101,4 +101,31 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('--dangerously-skip-permissions');
     expect(callArgs).toContain('--include-partial-messages');
   });
+
+  it('explicit empty tools disables all tools', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'text',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'p',
+      model: 'opus',
+      cwd: '/tmp',
+      tools: [],
+    })) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('ok');
+    const callArgs = execaMock.mock.calls[0]?.[1] ?? [];
+    const toolsFlagIdx = callArgs.findIndex((x: any) => x === '--tools');
+    expect(toolsFlagIdx).toBeGreaterThanOrEqual(0);
+    expect(callArgs[toolsFlagIdx + 1]).toBe('');
+  });
 });
