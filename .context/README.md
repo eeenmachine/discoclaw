@@ -9,6 +9,7 @@ This directory contains modular context files loaded on-demand based on the task
 | **Core repo context** | `core.md` |
 | **Development / build / test** | `dev.md` |
 | **Discord behavior + routing** | `discord.md` |
+| **Discord bot setup (invite + env)** | `bot-setup.md` |
 | **Runtime adapters (Claude CLI, OpenAI/Gemini later)** | `runtime.md` |
 | **Ops / systemd service** | `ops.md` |
 | **Security / injection / secrets** | `security.md` |
@@ -27,4 +28,3 @@ This directory contains modular context files loaded on-demand based on the task
 - **ops.md** — systemd service notes, logs, restart workflow
 - **security.md** — Secrets hygiene, injection defense, safe shelling
 - **workflows.md** — Commit/push discipline, checklists
-

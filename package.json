@@ -7,6 +7,7 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "discord:invite-url": "tsx scripts/discord-invite-url.ts",
     "sync:discord-context": "tsx scripts/sync-discord-context.ts",
     "migrate:weston-content": "tsx scripts/migrate-weston-content.ts",
     "test": "vitest run --passWithNoTests"
