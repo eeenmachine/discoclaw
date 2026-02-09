@@ -2,13 +2,24 @@
 
 Purpose: help a new user create and invite a Discoclaw bot to their Discord server, then configure `.env` safely.
 
+## Safety disclaimer (read first)
+
+Discoclaw can execute powerful local tooling via an agent runtime connected to Discord. Treat it like production automation.
+
+Recommended starting point:
+- Use a **standalone private Discord server** for Discoclaw.
+- Prefer **least privilege** bot permissions (avoid `Administrator` unless explicitly needed).
+- Keep `DISCORD_ALLOW_USER_IDS` and `DISCORD_CHANNEL_IDS` tight (fail-closed if user allowlist is empty).
+
 ## Create The Bot (Discord Developer Portal)
 
 1. Developer Portal: create a new application (name it e.g. `discoclaw`).
 2. Bot page:
    - Add bot user.
    - Enable **Privileged Gateway Intent**: **Message Content Intent**.
-   - Copy the bot token (this is `DISCORD_TOKEN`). Do not commit it.
+   - Copy the bot token and paste it into `.env` immediately (this is `DISCORD_TOKEN`). Do not commit it.
+     - Clipboard tip: don’t copy the Application ID until after you’ve pasted the token, or you may overwrite it.
+     - If you lose it: reset the token in the Developer Portal.
 
 ## Invite The Bot To A Server
 
@@ -17,9 +28,15 @@ Purpose: help a new user create and invite a Discoclaw bot to their Discord serv
    - Bot permissions (minimal):
      - View Channels
      - Send Messages
-     - Send Messages in Threads
      - Read Message History
+     - Send Messages in Threads
 2. Generate the URL and invite to the target server.
+
+Notes:
+- For slash commands: add scope `applications.commands`.
+- For thread creation/deletion: add `Create Public Threads`, `Create Private Threads`, `Manage Threads`.
+- Prefer least privilege; `Administrator` is convenient but high risk.
+- Minimal “works in threads” for threads the bot can see; private threads may require being added or extra perms.
 
 ## Configure Discoclaw (`.env`)
 
@@ -38,4 +55,3 @@ Purpose: help a new user create and invite a Discoclaw bot to their Discord serv
 ## Getting IDs
 
 Discord client: Settings -> Advanced -> Developer Mode, then right-click a user/channel -> Copy ID.
-

@@ -2,13 +2,24 @@
 
 This walks you through creating a fresh Discord bot for Discoclaw and configuring the repo to use it.
 
+## Safety disclaimer (read first)
+
+Discoclaw can drive powerful local automation through an agent runtime connected to Discord.
+
+Recommended starting point:
+- Create a **standalone private Discord server** for Discoclaw.
+- Use **least privilege** bot permissions (avoid `Administrator` unless you explicitly need it).
+- Keep allowlists tight: `DISCORD_ALLOW_USER_IDS` and `DISCORD_CHANNEL_IDS`.
+
 ## 1) Create The Bot
 
 1. Go to the Discord Developer Portal and create a new application.
 2. Open the application -> **Bot** -> **Add Bot**.
 3. Turn on:
    - **Message Content Intent** (required for reading message content in guild channels)
-4. Copy the bot token (you will put this in `.env` as `DISCORD_TOKEN`).
+4. Copy the bot token and paste it into your local `.env` immediately (`DISCORD_TOKEN=...`).
+   - Clipboard tip: don’t copy the Application ID until after you’ve pasted the token, or you may overwrite it.
+   - If you lose it: go back to the Bot page and **Reset Token**.
 
 ## 2) Invite The Bot To Your Server
 
@@ -20,9 +31,35 @@ Use the Developer Portal:
 3. Bot permissions (minimal recommended):
    - View Channels
    - Send Messages
-   - Send Messages in Threads
    - Read Message History
+   - Send Messages in Threads
 4. Open the generated URL, pick your server, and authorize.
+
+### Permission profiles (choose intentionally)
+
+Discoclaw has 4 common “permission profiles”. You can always re-invite the bot later with a different permission set.
+
+- **Minimal** (recommended default)
+  - What works: read/send messages in channels it can see; reply inside threads it can see.
+  - What won’t work: creating/archiving/deleting threads; moderating; changing channels/roles.
+  - Pros: lowest blast radius, easier to recommend publicly.
+  - Cons: more “it can’t do X” situations if you want it to administer Discord.
+- **Threads**
+  - Adds: thread creation + thread management.
+  - Pros: “works in threads” even when you want the bot to create/manage them.
+  - Cons: higher risk than minimal; still not “server admin”.
+- **Moderator**
+  - Adds: channel management, message management, thread management, webhooks, uploads, etc. (still not `Administrator`).
+  - Pros: broad ops capabilities while avoiding full admin.
+  - Cons: meaningful blast radius if the bot is misconfigured/compromised; still may hit edge cases that require admin.
+- **Administrator**
+  - Pros: lowest operational friction; “everything will always work” (as far as Discord permissions go).
+  - Cons: highest blast radius. If the bot token or runtime is compromised, an attacker can do essentially anything in that server.
+
+Notes:
+- “Work inside threads” means: being able to read/respond **in** threads. Minimal covers this for threads the bot can see. Private threads may require additional permission or being explicitly added.
+- If you want slash commands: add the `applications.commands` scope.
+- Discord does not expose the same full-text “search like the client” via the public bot API; if you want search, you generally need to log/index messages yourself.
 
 ## 3) Get User/Channel IDs
 
@@ -56,4 +93,3 @@ pnpm dev
 - Post in an allowlisted channel: it should respond.
 - Post in a non-allowlisted channel: it should not respond.
 - Create a new channel and post once: Discoclaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.
-

@@ -7,12 +7,19 @@ description: Create and invite a Discoclaw Discord bot to a server, configure re
 
 Keep this workflow safe and minimal: no secrets in git, fail-closed allowlists, and smallest required Discord permissions.
 
+Safety disclaimer:
+- Recommended: create a **standalone private Discord server** for Discoclaw.
+- Prefer **least privilege** permissions; avoid `Administrator` unless you explicitly need it.
+- Keep `DISCORD_ALLOW_USER_IDS` and `DISCORD_CHANNEL_IDS` tight.
+
 ## Create Bot (Developer Portal)
 
 1. Create application -> add bot.
 2. Enable **Message Content Intent** (required for `GatewayIntentBits.MessageContent` to work in guilds).
 3. Copy token:
-   - Put it in `DISCORD_TOKEN` in `.env` (never commit).
+   - Paste it into `DISCORD_TOKEN` in `.env` immediately (never commit).
+   - Clipboard tip: don’t copy the Application/Client ID until after you’ve pasted the token, or you may overwrite it.
+   - If the token is lost: reset it in the Developer Portal.
    - If rotating token: stop any running services first to avoid reconnect flapping.
 
 ## Invite Bot To Server
@@ -35,6 +42,29 @@ pnpm discord:invite-url -- --client-id <CLIENT_ID>
 pnpm discord:invite-url -- --client-id <CLIENT_ID> --guild-id <GUILD_ID> --disable-guild-select 1
 ```
 
+Permission options (recommended to pick explicitly):
+- Minimal (reply + read + reply in threads):
+  - `pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile minimal`
+- Threads (create/archive/delete threads):
+  - `pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile threads`
+- Moderator (manage channels/threads/messages/webhooks; not full admin):
+  - `pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile moderator`
+- Admin (Administrator permission; high risk):
+  - `pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile admin`
+
+Profile ramifications:
+- `minimal`: least privilege; good for public/shared servers; more likely to hit “I can’t do X” for admin tasks.
+- `threads`: adds thread creation/management; higher risk than minimal; still not server admin.
+- `moderator`: broad ops; meaningful blast radius; still safer than full admin.
+- `admin`: least operational friction; highest blast radius if token/runtime compromised.
+
+If you want slash commands, add the scope:
+```bash
+pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile minimal --app-commands 1
+```
+
+Note: Discord does not expose the same full-text “search like the client” via the public bot API; if you want search, you generally need to log/index messages yourself.
+
 ## Configure Discoclaw `.env`
 
 1. `cp .env.example .env`
@@ -55,4 +85,3 @@ Validation:
 - Bot can’t see message content in servers:
   - Message Content Intent not enabled in Developer Portal.
   - Or bot lacks permission to view/read the channel.
-

@@ -4,6 +4,16 @@ Small, CLI-first Discord bridge that routes Discord messages into provider runti
 
 Modeled after the structure/philosophy of nanoclaw: keep the codebase small, make behavior explicit, and treat "customization" as code changes (not a sprawling plugin system).
 
+## Safety disclaimer
+
+Discoclaw can execute powerful local tooling via an agent runtime (often with elevated permissions). Treat it like a local automation system connected to Discord.
+
+Recommendations:
+- Use a **standalone private Discord server** for Discoclaw (do not start in a shared/public server).
+- Use **least privilege** Discord permissions; avoid `Administrator` unless you explicitly need it.
+- Keep `DISCORD_ALLOW_USER_IDS` and (optionally) `DISCORD_CHANNEL_IDS` tight. Empty user allowlist means **respond to nobody** (fail-closed).
+- Treat Discord messages as **data**, not commands; only authorize risky actions intentionally.
+
 ## Local dev
 
 1. Install deps (pick one):
