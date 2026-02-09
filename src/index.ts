@@ -67,8 +67,9 @@ if (requireChannelContext && !discordChannelContext) {
 const defaultWorkspaceCwd = dataDir
   ? path.join(dataDir, 'workspace')
   : path.join(__dirname, '..', 'workspace');
-const workspaceCwd = process.env.WORKSPACE_CWD ?? defaultWorkspaceCwd;
-const groupsDir = process.env.GROUPS_DIR ?? path.join(__dirname, '..', 'groups');
+// Treat empty env vars as "unset" so `.env` placeholders don't override defaults.
+const workspaceCwd = (process.env.WORKSPACE_CWD ?? '').trim() || defaultWorkspaceCwd;
+const groupsDir = (process.env.GROUPS_DIR ?? '').trim() || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
 
 const claudeBin = process.env.CLAUDE_BIN ?? 'claude';
