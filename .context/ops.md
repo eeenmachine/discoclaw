@@ -12,6 +12,9 @@ systemctl --user status discoclaw.service
 journalctl --user -u discoclaw.service -f
 ```
 
+Build/deploy reminder:
+- The service runs `dist/index.js`, so run `pnpm build` after code changes.
+
 ## Runtime Working Directory
 - Default `WORKSPACE_CWD`:
   - `$DISCOCLAW_DATA_DIR/workspace` when `DISCOCLAW_DATA_DIR` is set

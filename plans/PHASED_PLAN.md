@@ -42,7 +42,7 @@ Guidelines:
 - [ ] Add a simple CI workflow (build + test) if desired.
 
 ## Phase 5: Ops
-- [ ] Update `systemd/discoclaw.service` template to include `DISCOCLAW_DATA_DIR` guidance.
+- [x] Update `systemd/discoclaw.service` template to include `DISCOCLAW_DATA_DIR` guidance.
 - [ ] Add an ops “rollout” checklist (private channel first, allowlist, logs, restart).
 
 ## Progress Log
