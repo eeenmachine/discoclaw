@@ -22,7 +22,7 @@ Guidelines:
 
 ## Phase 1: Safety + Routing Hardening
 - [ ] Verify fail-closed behavior end-to-end (empty allowlist responds to nobody).
-- [ ] Decide whether to support `DISCORD_CHANNEL_IDS` allowlist (currently unused).
+- [x] Decide whether to support `DISCORD_CHANNEL_IDS` allowlist (supported).
 - [ ] Add a short “safe operations” checklist for running in production channels.
 
 ## Phase 2: Data + Migration From Weston
@@ -46,4 +46,4 @@ Guidelines:
 
 ## Progress Log
 - 2026-02-09: Implemented new workspace defaults + docs; created Dropbox data root; created local `.env`.
-
+- 2026-02-09: Added optional `DISCORD_CHANNEL_IDS` allowlist and docs; started tests for allowlist parsing.
