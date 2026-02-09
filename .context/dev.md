@@ -17,6 +17,14 @@ pnpm sync:discord-context -- --rewrite-index
 pnpm sync:discord-context -- --add-channel 123456789012345678:my-channel
 ```
 
+## One-Off: Migrate From Legacy Weston
+
+```bash
+pnpm migrate:weston-content -- --dry-run
+pnpm migrate:weston-content -- --from ./legacy/weston
+pnpm migrate:weston-content -- --overwrite
+```
+
 ## Environment
 
 - Copy `.env.example` -> `.env`
