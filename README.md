@@ -25,6 +25,15 @@ cp .env.example .env
 pnpm dev
 ```
 
+## Workspace + Dropbox-backed content (recommended)
+
+Discoclaw runs the runtime (Claude CLI) in a separate working directory (`WORKSPACE_CWD`).
+
+- If you set `DISCOCLAW_DATA_DIR`, Discoclaw defaults `WORKSPACE_CWD` to `$DISCOCLAW_DATA_DIR/workspace`.
+- If you do not set `DISCOCLAW_DATA_DIR`, Discoclaw defaults `WORKSPACE_CWD` to `./workspace` (relative to this repo).
+
+This lets you keep the repo fast/local, while storing durable "workspace content" in a Dropbox folder.
+
 ## Notes
 
 - Default runtime is Claude Code via the `claude` CLI.

@@ -24,7 +24,11 @@ if (allowUserIds.size === 0) {
   log.warn('DISCORD_ALLOW_USER_IDS is empty: bot will respond to nobody (fail closed)');
 }
 
-const workspaceCwd = process.env.WORKSPACE_CWD ?? '/home/davidmarsh/weston';
+const dataDir = process.env.DISCOCLAW_DATA_DIR;
+const defaultWorkspaceCwd = dataDir
+  ? path.join(dataDir, 'workspace')
+  : path.join(__dirname, '..', 'workspace');
+const workspaceCwd = process.env.WORKSPACE_CWD ?? defaultWorkspaceCwd;
 const groupsDir = process.env.GROUPS_DIR ?? path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
 

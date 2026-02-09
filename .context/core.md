@@ -23,6 +23,8 @@
 - `groups/<sessionKey>/CLAUDE.md` — bootstrapped per-group instructions when group cwd is enabled
 
 ## External Workspace (Important)
-- By default the runtime working directory is `WORKSPACE_CWD=/home/davidmarsh/weston`.
-- Discoclaw should treat `/home/davidmarsh/weston` as an external workspace; do not make unrelated edits there while developing Discoclaw.
-
+- Discoclaw runs the runtime (Claude CLI) in a separate working directory (`WORKSPACE_CWD`).
+- Defaults:
+  - If `DISCOCLAW_DATA_DIR` is set, `WORKSPACE_CWD` defaults to `$DISCOCLAW_DATA_DIR/workspace`.
+  - Otherwise, `WORKSPACE_CWD` defaults to `./workspace` (relative to the repo).
+- You can still point `WORKSPACE_CWD` at an external workspace (for example, an older "weston" folder), but treat it as data: avoid unrelated edits while developing Discoclaw itself.

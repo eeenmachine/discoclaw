@@ -1,5 +1,9 @@
 node_modules/
 dist/
+workspace
+exports
+legacy
+var
 .env
 .env.*
 !.env.example
