@@ -252,6 +252,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.discordChannelContext) addDirs.push(params.discordChannelContext.contentDir);
 
           let finalText = '';
+          let deltaText = '';
           const t0 = Date.now();
           params.log?.info(
             {
@@ -280,14 +281,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               finalText = evt.text;
             } else if (evt.type === 'error') {
               finalText = `Error: ${evt.message}`;
-            } else if (evt.type === 'text_delta' && !finalText) {
-              // Only use deltas when we don't get a final text payload.
-              finalText += evt.text;
+            } else if (evt.type === 'text_delta') {
+              // Some runtimes never emit a final payload; keep deltas as a fallback.
+              deltaText += evt.text;
             }
           }
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
 
-          const chunks = splitDiscord(finalText || '(no output)');
+          const outText = finalText || deltaText || '(no output)';
+          const chunks = splitDiscord(outText);
           await reply.edit(chunks[0] ?? '(no output)');
           for (const extra of chunks.slice(1)) {
             await msg.channel.send(extra);
