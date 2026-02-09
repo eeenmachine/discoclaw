@@ -77,11 +77,13 @@ const dangerouslySkipPermissions = (process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSI
 const outputFormat = (process.env.CLAUDE_OUTPUT_FORMAT ?? 'text') === 'stream-json'
   ? 'stream-json'
   : 'text';
+const echoStdio = (process.env.CLAUDE_ECHO_STDIO ?? '0') === '1';
 
 const runtime = createClaudeCliRuntime({
   claudeBin,
   dangerouslySkipPermissions,
   outputFormat,
+  echoStdio,
 });
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));

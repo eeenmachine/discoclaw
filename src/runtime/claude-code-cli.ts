@@ -1,3 +1,4 @@
+import process from 'node:process';
 import { execa } from 'execa';
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 
@@ -37,6 +38,8 @@ export type ClaudeCliRuntimeOpts = {
   claudeBin: string;
   dangerouslySkipPermissions: boolean;
   outputFormat: 'text' | 'stream-json';
+  // Echo raw CLI output for debugging / "terminal-like" Discord output.
+  echoStdio?: boolean;
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -87,6 +90,13 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       cwd: params.cwd,
       timeout: params.timeoutMs,
       reject: false,
+      env: {
+        ...process.env,
+        // Prefer plain output: Discord doesn't render ANSI well.
+        NO_COLOR: process.env.NO_COLOR ?? '1',
+        FORCE_COLOR: process.env.FORCE_COLOR ?? '0',
+        TERM: process.env.TERM ?? 'dumb',
+      },
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -97,68 +107,146 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       return;
     }
 
-    if (opts.outputFormat === 'text') {
-      const { stdout, stderr, exitCode } = await subprocess;
-      if (exitCode !== 0) {
-        const msg = (stderr || stdout || `claude exit ${exitCode}`).trim();
-        yield { type: 'error', message: msg };
-        yield { type: 'done' };
+    // Emit stdout/stderr as they arrive via a small async queue so we can
+    // yield events from both streams without risking pipe backpressure deadlocks.
+    const q: EngineEvent[] = [];
+    let notify: (() => void) | null = null;
+    const wake = () => {
+      if (!notify) return;
+      const n = notify;
+      notify = null;
+      n();
+    };
+    const push = (evt: EngineEvent) => {
+      q.push(evt);
+      wake();
+    };
+    const wait = () => new Promise<void>((r) => { notify = r; });
+
+    let mergedStdout = '';
+    let merged = '';
+    let stdoutBuffered = '';
+    let stderrBuffered = '';
+    let stderrForError = '';
+    let finished = false;
+    let stdoutEnded = false;
+    let stderrEnded = subprocess.stderr == null;
+    let procResult: { exitCode: number | null | undefined; stdout: string; stderr: string } | null = null;
+
+    subprocess.stdout.on('data', (chunk) => {
+      const s = String(chunk);
+      mergedStdout += s;
+      if (opts.outputFormat === 'text') {
+        push({ type: 'text_delta', text: s });
         return;
       }
-      yield* textAsChunks(stdout.trimEnd());
-      return;
-    }
 
-    // stream-json: parse line-delimited JSON events.
-    let buffered = '';
-    let merged = '';
-
-    // Capture stderr in case we need to surface it on failure.
-    let stderrBuf = '';
-    subprocess.stderr?.on('data', (chunk) => {
-      stderrBuf += String(chunk);
-    });
-
-    for await (const chunk of subprocess.stdout) {
-      buffered += String(chunk);
-
-      const lines = buffered.split(/\r?\n/);
-      buffered = lines.pop() ?? '';
-
+      // stream-json: parse line-delimited JSON events.
+      stdoutBuffered += s;
+      const lines = stdoutBuffered.split(/\r?\n/);
+      stdoutBuffered = lines.pop() ?? '';
       for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed) continue;
-
         const evt = tryParseJsonLine(trimmed);
         const text = extractTextFromUnknownEvent(evt ?? trimmed);
         if (text) {
           merged += text;
-          yield { type: 'text_delta', text };
+          push({ type: 'text_delta', text });
         }
       }
+    });
+
+    subprocess.stderr?.on('data', (chunk) => {
+      const s = String(chunk);
+      stderrForError += s;
+      if (!opts.echoStdio) return;
+      stderrBuffered += s;
+      const lines = stderrBuffered.split(/\r?\n/);
+      stderrBuffered = lines.pop() ?? '';
+      for (const line of lines) {
+        push({ type: 'log_line', stream: 'stderr', line });
+      }
+    });
+
+    subprocess.stdout.on('end', () => {
+      stdoutEnded = true;
+      // If the process resolved before the streams flushed (mocked tests, edge cases),
+      // finalize once we know stdout is done.
+      tryFinalize();
+    });
+    subprocess.stderr?.on('end', () => {
+      stderrEnded = true;
+      tryFinalize();
+    });
+
+    function tryFinalize() {
+      if (finished) return;
+      if (!procResult) return;
+      if (!stdoutEnded) return;
+      if (!stderrEnded) return;
+
+      const exitCode = procResult.exitCode ?? 0;
+      const stdout = procResult.stdout;
+      const stderr = procResult.stderr;
+
+      // Flush trailing stderr.
+      const stderrTail = stderrBuffered.trimEnd();
+      if (opts.echoStdio && stderrTail) {
+        push({ type: 'log_line', stream: 'stderr', line: stderrTail });
+      }
+
+      if (opts.outputFormat === 'stream-json') {
+        // Flush trailing stdout.
+        const tail = stdoutBuffered.trim();
+        if (tail) {
+          const evt = tryParseJsonLine(tail);
+          const text = extractTextFromUnknownEvent(evt ?? tail);
+          if (text) {
+            merged += text;
+            push({ type: 'text_delta', text });
+          }
+        }
+      }
+
+      if (exitCode !== 0) {
+        const msg = (stderrForError || stderr || stdout || `claude exit ${exitCode}`).trim();
+        push({ type: 'error', message: msg });
+        push({ type: 'done' });
+        finished = true;
+        wake();
+        return;
+      }
+
+      if (opts.outputFormat === 'text') {
+        const final = (stdout || mergedStdout).trimEnd();
+        if (final) push({ type: 'text_final', text: final });
+      } else {
+        if (merged.trim()) push({ type: 'text_final', text: merged.trimEnd() });
+      }
+
+      push({ type: 'done' });
+      finished = true;
+      wake();
     }
 
-    const { exitCode } = await subprocess;
-    if (exitCode !== 0) {
-      const msg = (stderrBuf || `claude exit ${exitCode}`).trim();
-      yield { type: 'error', message: msg };
-      yield { type: 'done' };
-      return;
-    }
+    // When the process completes, wait for streams to end too, then finalize.
+    subprocess.then(({ exitCode, stdout, stderr }) => {
+      procResult = { exitCode, stdout: stdout ?? '', stderr: stderr ?? '' };
+      tryFinalize();
+    }).catch((err) => {
+      push({ type: 'error', message: String(err) });
+      push({ type: 'done' });
+      finished = true;
+      wake();
+    });
 
-    // Flush any trailing buffered line.
-    const tail = buffered.trim();
-    if (tail) {
-      const evt = tryParseJsonLine(tail);
-      const text = extractTextFromUnknownEvent(evt ?? tail);
-      if (text) {
-        merged += text;
-        yield { type: 'text_delta', text };
+    while (!finished || q.length > 0) {
+      if (q.length === 0) await wait();
+      while (q.length > 0) {
+        yield q.shift()!;
       }
     }
-
-    if (merged.trim()) yield { type: 'text_final', text: merged.trimEnd() };
-    yield { type: 'done' };
   }
 
   return {

@@ -150,6 +150,15 @@ function splitDiscord(text: string, limit = 2000): string[] {
   return chunks.filter((c) => c.trim().length > 0);
 }
 
+function renderDiscordTail(text: string, limit = 1900): string {
+  // Render a "tail" view for streaming updates without exceeding Discord limits.
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+  const tail = normalized.length > limit ? normalized.slice(normalized.length - limit) : normalized;
+  // Avoid breaking the fence if the content contains ``` sequences.
+  const safe = tail.replace(/```/g, '``\\`');
+  return `\`\`\`text\n${safe}\n\`\`\``;
+}
+
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike) {
   return async (msg: any) => {
     try {
@@ -254,6 +263,22 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let finalText = '';
           let deltaText = '';
           const t0 = Date.now();
+          let lastEditAt = 0;
+          const minEditIntervalMs = 1250;
+
+          const maybeEdit = async (force = false) => {
+            if (!reply) return;
+            const now = Date.now();
+            if (!force && now - lastEditAt < minEditIntervalMs) return;
+            lastEditAt = now;
+            const out = renderDiscordTail(deltaText || finalText || '(working...)');
+            try {
+              await reply.edit(out);
+            } catch {
+              // Ignore Discord edit errors during streaming.
+            }
+          };
+
           params.log?.info(
             {
               sessionKey,
@@ -279,11 +304,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           })) {
             if (evt.type === 'text_final') {
               finalText = evt.text;
+              await maybeEdit(true);
             } else if (evt.type === 'error') {
               finalText = `Error: ${evt.message}`;
+              await maybeEdit(true);
             } else if (evt.type === 'text_delta') {
               // Some runtimes never emit a final payload; keep deltas as a fallback.
               deltaText += evt.text;
+              await maybeEdit(false);
+            } else if (evt.type === 'log_line') {
+              // Echo stderr into the streamed output when enabled by the runtime.
+              const prefix = evt.stream === 'stderr' ? '[stderr] ' : '';
+              deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+              await maybeEdit(false);
             }
           }
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');

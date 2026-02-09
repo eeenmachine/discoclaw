@@ -1,6 +1,7 @@
 export type EngineEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'text_final'; text: string }
+  | { type: 'log_line'; stream: 'stdout' | 'stderr'; line: string }
   | { type: 'tool_start'; name: string; input?: unknown }
   | { type: 'tool_end'; name: string; output?: unknown; ok: boolean }
   | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number }
