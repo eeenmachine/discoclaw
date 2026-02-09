@@ -58,6 +58,7 @@ describe('prompt includes correct context file paths', () => {
       requireChannelContext: true,
       autoIndexChannelContext: false,
       autoJoinThreads: false,
+      useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
     }, queue);
 
@@ -106,6 +107,7 @@ describe('prompt includes correct context file paths', () => {
       requireChannelContext: true,
       autoIndexChannelContext: false,
       autoJoinThreads: false,
+      useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
     }, queue);
 
@@ -154,6 +156,7 @@ describe('prompt includes correct context file paths', () => {
       requireChannelContext: true,
       autoIndexChannelContext: false,
       autoJoinThreads: false,
+      useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
     }, queue);
 

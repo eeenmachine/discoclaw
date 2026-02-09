@@ -28,6 +28,8 @@ export type BotParams = {
   // Best-effort: join threads so the bot can respond inside them.
   // Note: private threads still require the bot to be added to the thread.
   autoJoinThreads: boolean;
+  // If false, do not pass `--session-id` to the runtime (useful if session persistence hangs).
+  useRuntimeSessions: boolean;
   runtime: RuntimeAdapter;
   sessionManager: SessionManager;
   workspaceCwd: string;
@@ -190,7 +192,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       await queue.run(sessionKey, async () => {
         let reply: any = null;
         try {
-          const sessionId = await params.sessionManager.getOrCreate(sessionKey);
+          const sessionId = params.useRuntimeSessions
+            ? await params.sessionManager.getOrCreate(sessionKey)
+            : null;
 
           // If the message is in a thread, join it before replying so sends don't fail.
           if (params.autoJoinThreads && isThread) {

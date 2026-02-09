@@ -59,6 +59,7 @@ try {
 const requireChannelContext = (process.env.DISCORD_REQUIRE_CHANNEL_CONTEXT ?? '1') === '1';
 const autoIndexChannelContext = (process.env.DISCORD_AUTO_INDEX_CHANNEL_CONTEXT ?? '1') === '1';
 const autoJoinThreads = (process.env.DISCORD_AUTO_JOIN_THREADS ?? '0') === '1';
+const useRuntimeSessions = (process.env.DISCOCLAW_RUNTIME_SESSIONS ?? '1') === '1';
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
   process.exit(1);
@@ -104,6 +105,7 @@ if ((process.env.DISCOCLAW_DEBUG_RUNTIME ?? '0') === '1') {
         timeoutMs: runtimeTimeoutMs,
         workspaceCwd,
         groupsDir,
+        useRuntimeSessions,
       },
     },
     'debug:runtime config',
@@ -128,6 +130,7 @@ await startDiscordBot({
   requireChannelContext,
   autoIndexChannelContext,
   autoJoinThreads,
+  useRuntimeSessions,
   runtime,
   sessionManager,
   workspaceCwd,

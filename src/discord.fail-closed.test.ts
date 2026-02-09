@@ -24,6 +24,7 @@ describe('Discord handler (fail closed)', () => {
       requireChannelContext: true,
       autoIndexChannelContext: true,
       autoJoinThreads: false,
+      useRuntimeSessions: true,
     }, queue);
 
     const msg = {
@@ -57,6 +58,7 @@ describe('Discord handler (fail closed)', () => {
       requireChannelContext: true,
       autoIndexChannelContext: true,
       autoJoinThreads: false,
+      useRuntimeSessions: true,
     }, queue);
 
     const msg = {
