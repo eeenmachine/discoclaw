@@ -81,6 +81,18 @@ Requirements:
 - Destructive actions (delete, kick, ban, timeout) prompt Claude to confirm with the user first.
 - If actions fail with "Missing Permissions", the bot's role lacks the required permission.
 
+## Status Channel
+When `DISCOCLAW_STATUS_CHANNEL` is set to a channel name or ID, Discoclaw posts colored embeds on key events:
+- **Bot Online** (green) — posted after the `ready` event fires
+- **Bot Offline** (gray) — posted on SIGTERM/SIGINT (best-effort)
+- **Runtime Error** (red) — Claude CLI returned an error or timed out
+- **Handler Failure** (red) — uncaught exception in message processing
+- **Action Failed** (orange) — a Discord action returned `{ ok: false }`
+
+Fail-open: if the channel is not found or the env var is unset, the bot works normally with no status posts. Errors posting to the status channel are caught and logged, never crashing the bot.
+
+Implementation: `src/discord/status-channel.ts`
+
 ## Group CWD Mode
 If `USE_GROUP_DIR_CWD=1`:
 - CWD becomes `groups/<sessionKey>/` for that Discord context.

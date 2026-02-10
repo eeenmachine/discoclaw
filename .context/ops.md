@@ -55,3 +55,4 @@ Validation:
 - Post in an allowlisted channel (should respond, and should read `content/discord/...` context).
 - Post in a non-allowlisted channel (should not respond).
 - Create a new channel and post once (should auto-index + create a stub context file).
+- If `DISCOCLAW_STATUS_CHANNEL` is set, confirm a green "Bot Online" embed appears on startup and a gray "Bot Offline" embed on shutdown.
