@@ -119,6 +119,29 @@ describe('sendMessage', () => {
     );
     expect(result).toEqual({ ok: false, error: 'Channel "#nonexistent" not found' });
   });
+
+  it('rejects content exceeding 2000 chars', async () => {
+    const ch = makeMockChannel({ name: 'general' });
+    const ctx = makeCtx([ch]);
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: 'x'.repeat(2001) },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('2000 character limit');
+    expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty content', async () => {
+    const ch = makeMockChannel({ name: 'general' });
+    const ctx = makeCtx([ch]);
+    const result = await executeMessagingAction(
+      { type: 'sendMessage', channel: '#general', content: '   ' },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('non-empty string');
+  });
 });
 
 describe('react', () => {
@@ -202,6 +225,16 @@ describe('editMessage', () => {
 
     expect(result).toEqual({ ok: true, summary: 'Edited message in #general' });
     expect(msg.edit).toHaveBeenCalledWith('Updated');
+  });
+
+  it('rejects content exceeding 2000 chars', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'editMessage', channelId: 'ch1', messageId: 'msg1', content: 'x'.repeat(2001) },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('2000 character limit');
   });
 });
 

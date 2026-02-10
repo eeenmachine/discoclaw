@@ -16,7 +16,11 @@ export function resolveChannel(
 
   // Try by ID first (numeric strings).
   const byId = guild.channels.cache.get(cleaned);
-  if (byId && isTextBased(byId)) return byId as GuildTextBasedChannel;
+  if (byId) {
+    // If the ID matched but isn't text-based, don't fall through to name lookup —
+    // the caller explicitly referenced this channel by ID.
+    return isTextBased(byId) ? (byId as GuildTextBasedChannel) : undefined;
+  }
 
   // Try by name (case-insensitive).
   const byName = guild.channels.cache.find(

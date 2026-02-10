@@ -24,6 +24,12 @@ export const MESSAGING_ACTION_TYPES = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DISCORD_MAX_CONTENT = 2000;
+
+// ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
 
@@ -35,6 +41,12 @@ export async function executeMessagingAction(
 
   switch (action.type) {
     case 'sendMessage': {
+      if (typeof action.content !== 'string' || !action.content.trim()) {
+        return { ok: false, error: 'sendMessage requires non-empty string content' };
+      }
+      if (action.content.length > DISCORD_MAX_CONTENT) {
+        return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
+      }
       const channel = resolveChannel(guild, action.channel);
       if (!channel) return { ok: false, error: `Channel "${action.channel}" not found` };
 
@@ -91,6 +103,12 @@ export async function executeMessagingAction(
     }
 
     case 'editMessage': {
+      if (typeof action.content !== 'string' || !action.content.trim()) {
+        return { ok: false, error: 'editMessage requires non-empty string content' };
+      }
+      if (action.content.length > DISCORD_MAX_CONTENT) {
+        return { ok: false, error: `Content exceeds Discord's ${DISCORD_MAX_CONTENT} character limit (got ${action.content.length})` };
+      }
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel || !('messages' in channel)) return { ok: false, error: `Channel "${action.channelId}" not found` };
       const message = await (channel as any).messages.fetch(action.messageId);

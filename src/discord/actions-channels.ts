@@ -54,10 +54,13 @@ export async function executeChannelAction(
     }
 
     case 'channelEdit': {
+      if (action.name == null && action.topic == null) {
+        return { ok: false, error: 'channelEdit requires at least one of name or topic' };
+      }
       const channel = guild.channels.cache.get(action.channelId);
       if (!channel) return { ok: false, error: `Channel "${action.channelId}" not found` };
 
-      const edits: any = {};
+      const edits: { name?: string; topic?: string } = {};
       if (action.name != null) edits.name = action.name;
       if (action.topic != null) edits.topic = action.topic;
 

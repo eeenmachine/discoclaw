@@ -94,11 +94,25 @@ describe('channelEdit', () => {
     const ctx = makeCtx(guild);
 
     const result = await executeChannelAction(
-      { type: 'channelEdit', channelId: 'nope' },
+      { type: 'channelEdit', channelId: 'nope', name: 'x' },
       ctx,
     );
 
     expect(result).toEqual({ ok: false, error: 'Channel "nope" not found' });
+  });
+
+  it('fails when no fields provided', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction(
+      { type: 'channelEdit', channelId: 'ch1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'channelEdit requires at least one of name or topic' });
   });
 });
 
