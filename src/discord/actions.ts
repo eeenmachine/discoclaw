@@ -155,5 +155,14 @@ You can perform Discord server actions by including structured action blocks in 
 ### Rules
 - Only \`channelCreate\` and \`channelList\` are supported. You cannot delete channels, manage roles, or perform moderation actions.
 - Confirm with the user before creating channels.
-- Action blocks are removed from the displayed message; results are appended automatically.`;
+- Action blocks are removed from the displayed message; results are appended automatically.
+
+### Permissions
+These actions require the bot to have **Manage Channels** permission in this Discord server. This is a server-level role permission, not a Discord Developer Portal setting.
+
+If an action fails with a "Missing Permissions" or "Missing Access" error, tell the user:
+1. Open **Server Settings → Roles**.
+2. Find the Discoclaw bot's role (usually named after the bot).
+3. Enable **Manage Channels** under the role's permissions.
+4. The bot may need to be re-invited with the "moderator" permission profile if the role wasn't granted at invite time. The server owner or an admin can also grant it directly via Server Settings → Roles.`;
 }

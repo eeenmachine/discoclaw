@@ -57,9 +57,9 @@ Permission options (recommended to pick explicitly):
   - `pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile admin`
 
 Profile ramifications:
-- `minimal`: least privilege; good for public/shared servers; more likely to hit “I can’t do X” for admin tasks.
-- `threads`: adds thread creation/management; higher risk than minimal; still not server admin.
-- `moderator`: broad ops; meaningful blast radius; still safer than full admin.
+- `minimal`: least privilege; good for public/shared servers; more likely to hit "I can't do X" for admin tasks. Discord Actions (`DISCOCLAW_DISCORD_ACTIONS=1`) will not work — the bot lacks Manage Channels.
+- `threads`: adds thread creation/management; higher risk than minimal; still not server admin. Discord Actions will not work.
+- `moderator`: broad ops; meaningful blast radius; still safer than full admin. **Required for Discord Actions** (channel create/list) — includes Manage Channels.
 - `admin`: least operational friction; highest blast radius if token/runtime compromised.
 
 If you want slash commands, add the scope:
@@ -95,6 +95,9 @@ Threads:
 
 - Bot responds to nobody:
   - `DISCORD_ALLOW_USER_IDS` is empty or malformed.
-- Bot can’t see message content in servers:
+- Bot can't see message content in servers:
   - Message Content Intent not enabled in Developer Portal.
   - Or bot lacks permission to view/read the channel.
+- Discord Actions fail with "Missing Permissions":
+  - Bot was invited with `minimal` or `threads` profile (no Manage Channels).
+  - Fix: re-invite with `moderator` profile, or grant Manage Channels to the bot's role via Server Settings → Roles.

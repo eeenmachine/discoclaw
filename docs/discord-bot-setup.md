@@ -41,16 +41,16 @@ Discoclaw has 4 common “permission profiles”. You can always re-invite the b
 
 - **Minimal** (recommended default)
   - What works: read/send messages in channels it can see; reply inside threads it can see.
-  - What won’t work: creating/archiving/deleting threads; moderating; changing channels/roles.
+  - What won't work: creating/archiving/deleting threads; moderating; changing channels/roles; Discord Actions.
   - Pros: lowest blast radius, easier to recommend publicly.
-  - Cons: more “it can’t do X” situations if you want it to administer Discord.
+  - Cons: more "it can't do X" situations if you want it to administer Discord.
 - **Threads**
   - Adds: thread creation + thread management.
-  - Pros: “works in threads” even when you want the bot to create/manage them.
-  - Cons: higher risk than minimal; still not “server admin”.
+  - Pros: "works in threads" even when you want the bot to create/manage them.
+  - Cons: higher risk than minimal; still not "server admin". Discord Actions won't work (no Manage Channels).
 - **Moderator**
   - Adds: channel management, message management, thread management, webhooks, uploads, etc. (still not `Administrator`).
-  - Pros: broad ops capabilities while avoiding full admin.
+  - Pros: broad ops capabilities while avoiding full admin. **Required for Discord Actions** (`DISCOCLAW_DISCORD_ACTIONS=1`) — includes Manage Channels permission.
   - Cons: meaningful blast radius if the bot is misconfigured/compromised; still may hit edge cases that require admin.
 - **Administrator**
   - Pros: lowest operational friction; “everything will always work” (as far as Discord permissions go).

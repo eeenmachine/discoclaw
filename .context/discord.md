@@ -48,9 +48,11 @@ Available actions:
 - `channelList` — List all channels grouped by category.
 
 Requirements:
-- The bot needs **Manage Channels** permission in the server.
+- The bot needs **Manage Channels** permission in the server (server-level role permission, not a Developer Portal setting).
+- This means the bot must be invited with at least the `moderator` permission profile, or have Manage Channels granted manually via Server Settings → Roles.
 - Only works in guild channels (not DMs).
 - Default off (`0`). Only allowlisted users can trigger actions.
+- If actions fail with "Missing Permissions", the bot's role lacks Manage Channels.
 
 ## Group CWD Mode
 If `USE_GROUP_DIR_CWD=1`:
