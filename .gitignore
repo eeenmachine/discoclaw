@@ -9,6 +9,7 @@ var
 .env.*
 !.env.example
 data/*.json
+data/*.pid
 *.log
 
 # Local Claude Code state (skills installs, etc.)

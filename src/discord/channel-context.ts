@@ -12,8 +12,7 @@ export type DiscordChannelContext = {
   contentDir: string;
   indexPath: string;
   baseDir: string;
-  baseCorePath: string;
-  baseSafetyPath: string;
+  baseFiles: string[];
   baseCoreLinkFromChannel: string;
   baseSafetyLinkFromChannel: string;
   channelsDir: string;
@@ -172,15 +171,17 @@ export async function loadDiscordChannelContext(opts: {
   const contentDir = opts.contentDir;
   const indexPath = path.join(contentDir, 'discord', 'DISCORD.md');
   const baseDir = path.join(contentDir, 'discord', 'base');
-  const baseCorePath = path.join(baseDir, 'core.md');
-  const baseSafetyPath = path.join(baseDir, 'safety.md');
   const channelsDir = path.join(contentDir, 'discord', 'channels');
   const dmContextPath = path.join(channelsDir, 'dm.md');
   const baseCoreLinkFromChannel = '../base/core.md';
   const baseSafetyLinkFromChannel = '../base/safety.md';
 
+  // Ensure base/ directory exists.
+  await fs.mkdir(baseDir, { recursive: true });
+
+  // Seed minimal core.md / safety.md if the directory is empty (first run).
   await writeFileIfMissing(
-    baseCorePath,
+    path.join(baseDir, 'core.md'),
     [
       '# Discord Base Context (Core)',
       '',
@@ -192,7 +193,7 @@ export async function loadDiscordChannelContext(opts: {
     ].join('\n'),
   );
   await writeFileIfMissing(
-    baseSafetyPath,
+    path.join(baseDir, 'safety.md'),
     [
       '# Discord Base Context (Safety)',
       '',
@@ -203,6 +204,13 @@ export async function loadDiscordChannelContext(opts: {
       '',
     ].join('\n'),
   );
+
+  // Load all .md files from base/ so new context files are picked up automatically.
+  const baseEntries = await fs.readdir(baseDir);
+  const baseFiles = baseEntries
+    .filter((f) => f.endsWith('.md'))
+    .sort()
+    .map((f) => path.join(baseDir, f));
 
   await writeFileIfMissing(
     dmContextPath,
@@ -248,8 +256,7 @@ export async function loadDiscordChannelContext(opts: {
     contentDir,
     indexPath,
     baseDir,
-    baseCorePath,
-    baseSafetyPath,
+    baseFiles,
     baseCoreLinkFromChannel,
     baseSafetyLinkFromChannel,
     channelsDir,

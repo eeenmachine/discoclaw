@@ -8,8 +8,20 @@ See: `src/runtime/types.ts`
 
 ## Claude Code CLI Runtime (Current)
 - Adapter: `src/runtime/claude-code-cli.ts`
-- Invocation shape (simplified):
-  - `claude -p --model <id|alias> [--session-id <uuid>] [--tools ...] [--add-dir ...] <prompt>`
+- Invocation shape (full):
+  ```
+  claude -p --model <id|alias>
+    [--dangerously-skip-permissions]          # when CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1
+    [--strict-mcp-config]                     # when CLAUDE_STRICT_MCP_CONFIG=1
+    [--debug-file <path>]                     # when CLAUDE_DEBUG_FILE is set
+    [--session-id <uuid>]                     # when sessions are enabled
+    [--add-dir <dir> ...]                     # group CWD mode
+    [--output-format text|stream-json]        # always passed
+    [--include-partial-messages]              # when format is stream-json
+    [--tools <comma-list>]                    # configurable tool surface
+    -- <prompt>                               # POSIX terminator before prompt
+  ```
+- The `--` terminator prevents variadic flags (e.g. `--tools`, `--add-dir`) from consuming the positional prompt argument.
 - Output modes:
   - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; Discoclaw parses JSONL and streams text)
   - `CLAUDE_OUTPUT_FORMAT=text` (fallback if your local CLI doesn't support stream-json)

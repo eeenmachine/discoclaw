@@ -21,6 +21,13 @@ Build/deploy reminder:
   - `./workspace` otherwise
 - Optional group CWD: `USE_GROUP_DIR_CWD=1` and `GROUPS_DIR=...`
 
+## PID Lock (Startup Guard)
+- On startup, Discoclaw writes its PID to `data/discoclaw.pid` and checks for an existing lock.
+- If another live process holds the lock, startup is refused with an error.
+- Stale locks (from `SIGKILL` or crashes) are detected via `kill(pid, 0)` and automatically overwritten.
+- On `SIGTERM` or `SIGINT`, the lock file is released before exit.
+- Implementation: `src/pidlock.ts`
+
 ## Safety
 - Prefer running new behavior in a private channel first.
 - Keep allowlist strict; do not run with an empty allowlist.
@@ -31,7 +38,7 @@ Build/deploy reminder:
 
 ## Rollout Checklist
 Preflight:
-- Confirm legacy bots/gateways are stopped/disabled on this host.
+- Confirm legacy bots/gateways are stopped/disabled on this host. (The PID lock in `data/discoclaw.pid` will prevent a second discoclaw instance, but won't catch a different bot using the same token.)
 - Confirm `.env` has `DISCORD_TOKEN` and a non-empty `DISCORD_ALLOW_USER_IDS` (fail-closed otherwise).
 - If running in a server/guild, set `DISCORD_CHANNEL_IDS` to the minimum set of channels.
 - Confirm `DISCORD_REQUIRE_CHANNEL_CONTEXT=1` and `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT=1`.

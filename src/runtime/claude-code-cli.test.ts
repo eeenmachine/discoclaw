@@ -171,6 +171,37 @@ describe('Claude CLI runtime adapter (smoke)', () => {
     expect(callArgs).toContain('--strict-mcp-config');
   });
 
+  it('stream-json prefers result event text over merged deltas', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'message_delta', text: 'thinking...' }),
+        JSON.stringify({ type: 'message_delta', text: '<tool_use>read file</tool_use>' }),
+        JSON.stringify({ type: 'message_delta', text: 'The answer is 42.' }),
+        JSON.stringify({ type: 'result', result: 'The answer is 42.' }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({
+      prompt: 'p',
+      model: 'opus',
+      cwd: '/tmp',
+    })) {
+      events.push(evt);
+    }
+
+    // Should use the clean result text, not the merged deltas with tool_use blocks.
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('The answer is 42.');
+  });
+
   it('--strict-mcp-config is omitted when disabled', async () => {
     const execaMock = execa as any;
     execaMock.mockImplementation(() => makeProcessText({ stdout: 'ok', exitCode: 0 }));

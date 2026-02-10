@@ -6,18 +6,49 @@ function extractTextFromUnknownEvent(evt: unknown): string | null {
   if (!evt || typeof evt !== 'object') return null;
   const anyEvt = evt as Record<string, unknown>;
 
+  // Claude CLI stream-json emits nested structures; check common shapes.
   const candidates: unknown[] = [
     anyEvt.text,
     anyEvt.delta,
     anyEvt.content,
-    // Sometimes nested.
+    // Sometimes nested under .data.
     (anyEvt.data && typeof anyEvt.data === 'object') ? (anyEvt.data as any).text : undefined,
+    // Claude CLI stream-json: event.delta.text (content_block_delta events)
+    (anyEvt.event && typeof anyEvt.event === 'object' &&
+     (anyEvt.event as any).delta && typeof (anyEvt.event as any).delta === 'object')
+      ? (anyEvt.event as any).delta.text
+      : undefined,
   ];
 
   for (const c of candidates) {
     if (typeof c === 'string' && c.length > 0) return c;
   }
   return null;
+}
+
+/** Extract the final result text from a Claude CLI stream-json "result" event. */
+function extractResultText(evt: unknown): string | null {
+  if (!evt || typeof evt !== 'object') return null;
+  const anyEvt = evt as Record<string, unknown>;
+  if (anyEvt.type === 'result' && typeof anyEvt.result === 'string' && anyEvt.result.length > 0) {
+    return anyEvt.result;
+  }
+  return null;
+}
+
+/**
+ * Strip tool-call XML blocks and keep only the final answer.
+ * When tool blocks are present, the text before/between them is narration
+ * ("Let me read the files...") — we only want the text *after* the last block.
+ */
+function stripToolUseBlocks(text: string): string {
+  const toolPattern = /<tool_use>[\s\S]*?<\/tool_use>|<tool_calls>[\s\S]*?<\/tool_calls>|<tool_results>[\s\S]*?<\/tool_results>|<tool_call>[\s\S]*?<\/tool_call>|<tool_result>[\s\S]*?<\/tool_result>/g;
+  const segments = text.split(toolPattern);
+  // If tool blocks exist, keep only the last segment (the final answer).
+  const result = segments.length > 1
+    ? segments[segments.length - 1] ?? ''
+    : text;
+  return result.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function* textAsChunks(text: string): Generator<EngineEvent> {
@@ -154,6 +185,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
 
     let mergedStdout = '';
     let merged = '';
+    let resultText = '';  // fallback from "result" event if no deltas were extracted
+    let inToolUse = false;  // track whether we're inside a <tool_use> block
     let stdoutBuffered = '';
     let stderrBuffered = '';
     let stderrForError = '';
@@ -186,7 +219,16 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         const text = extractTextFromUnknownEvent(evt ?? trimmed);
         if (text) {
           merged += text;
-          push({ type: 'text_delta', text });
+          // Suppress tool-call blocks from streaming deltas.
+          const hasToolOpen = text.includes('<tool_use>') || text.includes('<tool_calls>') || text.includes('<tool_call>') || text.includes('<tool_results>') || text.includes('<tool_result>');
+          const hasToolClose = text.includes('</tool_use>') || text.includes('</tool_calls>') || text.includes('</tool_call>') || text.includes('</tool_results>') || text.includes('</tool_result>');
+          if (hasToolOpen) inToolUse = true;
+          if (!inToolUse) push({ type: 'text_delta', text });
+          if (hasToolClose) inToolUse = false;
+        } else if (evt) {
+          // Capture result text as fallback (don't merge — avoids double-counting with deltas).
+          const rt = extractResultText(evt);
+          if (rt) resultText = rt;
         }
       }
     });
@@ -280,7 +322,11 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
         const final = (stdout || mergedStdout).trimEnd();
         if (final) push({ type: 'text_final', text: final });
       } else {
-        if (merged.trim()) push({ type: 'text_final', text: merged.trimEnd() });
+        // Prefer clean result text; fall back to accumulated deltas.
+        const raw = resultText.trim() || (merged.trim() ? merged.trimEnd() : '');
+        // Strip tool_use XML blocks that leak into text content.
+        const final = stripToolUseBlocks(raw);
+        if (final) push({ type: 'text_final', text: final });
       }
 
       push({ type: 'done' });

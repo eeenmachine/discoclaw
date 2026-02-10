@@ -13,13 +13,17 @@
 ## Repo Layout
 - `src/index.ts` — entrypoint
 - `src/discord.ts` — Discord bot + routing + per-session queue
+- `src/discord/` — Discord submodules (allowlist, channel-context, session-key)
 - `src/runtime/` — runtime adapters (Claude CLI now; OpenAI/Gemini later)
 - `src/sessions.ts` — sessionKey -> UUID mapping (stored in `data/sessions.json`)
+- `src/pidlock.ts` — PID lock (duplicate instance guard)
+- `src/group-queue.ts` — per-session concurrency serialization
 - `groups/` — optional per-session working directories (nanoclaw-style). Enabled by `USE_GROUP_DIR_CWD=1`.
 - `systemd/discoclaw.service` — service unit template
 
 ## State Files
 - `data/sessions.json` (gitignored) — sessionKey -> UUID mapping
+- `data/discoclaw.pid` (gitignored) — PID lock file preventing duplicate instances (auto-cleaned on SIGTERM/SIGINT; stale locks from SIGKILL are detected and overwritten on next startup)
 - `groups/<sessionKey>/CLAUDE.md` — bootstrapped per-group instructions when group cwd is enabled
 
 ## External Workspace (Important)

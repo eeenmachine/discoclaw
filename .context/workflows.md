@@ -15,6 +15,13 @@ git status --short
 git commit -am \"...\"  # or stage selectively
 ```
 
+## Deploy After Code Changes
+```bash
+pnpm build
+systemctl --user restart discoclaw.service
+journalctl --user -u discoclaw.service -f   # tail logs to verify
+```
+
 ## When Adding New Behavior
 - Prefer a small “Phase 1” implementation that can be run safely in a private Discord channel.
 - Add guardrails first (allowlist, timeouts, queueing) before adding features (streaming, cron, commands).

@@ -24,6 +24,8 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 ## Repo Working Rules
 - Prefer small, auditable changes that preserve the “nanoclaw-style” philosophy. See `docs/philosophy.md`.
 - Commit after `pnpm build` is green for a logical unit of work.
+- Commit regularly — don't batch an entire session into one commit.
+- After completing a task, offer to push to the remote.
 - End of task: `git status --short` must be clean or intentionally staged.
 
 ## Quick Commands
