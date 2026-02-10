@@ -83,7 +83,7 @@ export function parseDiscordActions(
       // Malformed JSON — skip silently.
     }
     return '';
-  });
+  }).replace(/\n{3,}/g, '\n\n').trim();
 
   return { cleanText, actions };
 }

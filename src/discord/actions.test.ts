@@ -59,6 +59,15 @@ describe('parseDiscordActions', () => {
     expect(actions).toHaveLength(0);
     expect(cleanText).toBe(input);
   });
+
+  it('collapses blank lines left by multiple stripped action blocks', () => {
+    const block = '<discord-action>{"type":"channelList"}</discord-action>';
+    const input = `Here is the list:\n${block}\n${block}\n${block}\n${block}\n${block}\nDone.`;
+    const { cleanText, actions } = parseDiscordActions(input, ALL_FLAGS);
+    expect(actions).toHaveLength(5);
+    expect(cleanText).not.toMatch(/\n{3,}/);
+    expect(cleanText).toBe('Here is the list:\n\nDone.');
+  });
 });
 
 // ---------------------------------------------------------------------------
