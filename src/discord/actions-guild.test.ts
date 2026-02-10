@@ -223,14 +223,14 @@ describe('searchMessages', () => {
 describe('eventList', () => {
   it('lists events', async () => {
     const events = new Map([
-      ['e1', { name: 'Team Meeting', scheduledStartAt: new Date('2025-02-01T15:00:00Z'), description: 'Weekly sync' }],
+      ['e1', { id: 'e1', name: 'Team Meeting', scheduledStartAt: new Date('2025-02-01T15:00:00Z'), description: 'Weekly sync' }],
     ]);
     const ctx = makeCtx({ events });
 
     const result = await executeGuildAction({ type: 'eventList' }, ctx);
 
     expect(result.ok).toBe(true);
-    expect((result as any).summary).toContain('Team Meeting');
+    expect((result as any).summary).toContain('Team Meeting (id:e1)');
   });
 
   it('shows empty message when no events', async () => {

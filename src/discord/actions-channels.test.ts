@@ -53,6 +53,62 @@ function makeCtx(guild: any): ActionContext {
 }
 
 // ---------------------------------------------------------------------------
+// channelList
+// ---------------------------------------------------------------------------
+
+describe('channelList', () => {
+  it('channels grouped by category include IDs', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Dev', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText, parentName: 'Dev' },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction({ type: 'channelList' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('#general (id:ch1)');
+  });
+
+  it('uncategorized channels include IDs', async () => {
+    const guild = makeMockGuild([
+      { id: 'ch1', name: 'random', type: ChannelType.GuildText },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction({ type: 'channelList' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('#random (id:ch1)');
+  });
+
+  it('categories themselves excluded from output', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat1', name: 'Dev', type: ChannelType.GuildCategory },
+      { id: 'ch1', name: 'general', type: ChannelType.GuildText, parentName: 'Dev' },
+    ]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction({ type: 'channelList' }, ctx);
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    // Category name appears as a grouping label, not as a channel entry
+    expect(summary).not.toContain('#Dev');
+    expect(summary).not.toContain('(id:cat1)');
+  });
+
+  it('empty server returns (no channels)', async () => {
+    const guild = makeMockGuild([]);
+    const ctx = makeCtx(guild);
+
+    const result = await executeChannelAction({ type: 'channelList' }, ctx);
+
+    expect(result).toEqual({ ok: true, summary: '(no channels)' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // channelEdit
 // ---------------------------------------------------------------------------
 

@@ -168,8 +168,8 @@ describe('executeDiscordActions', () => {
     expect(results).toHaveLength(1);
     expect(results[0].ok).toBe(true);
     const summary = (results[0] as { ok: true; summary: string }).summary;
-    expect(summary).toContain('#random');
-    expect(summary).toContain('Dev: #general');
+    expect(summary).toContain('#random (id:ch2)');
+    expect(summary).toContain('Dev: #general (id:ch1)');
   });
 
   it('handles API errors gracefully', async () => {

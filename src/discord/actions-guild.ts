@@ -131,7 +131,7 @@ export async function executeGuildAction(
 
       const lines = [...events.values()].map((e: any) => {
         const start = e.scheduledStartAt ? fmtTime(e.scheduledStartAt) : 'TBD';
-        return `${e.name} — ${start}${e.description ? ` — ${e.description.slice(0, 80)}` : ''}`;
+        return `${e.name} (id:${e.id}) — ${start}${e.description ? ` — ${e.description.slice(0, 80)}` : ''}`;
       });
       return { ok: true, summary: `Scheduled events:\n${lines.join('\n')}` };
     }

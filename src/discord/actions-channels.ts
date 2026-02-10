@@ -91,10 +91,10 @@ export async function executeChannelAction(
         const parentName = ch.parent?.name;
         if (parentName) {
           const list = grouped.get(parentName) ?? [];
-          list.push(`#${ch.name}`);
+          list.push(`#${ch.name} (id:${ch.id})`);
           grouped.set(parentName, list);
         } else {
-          uncategorized.push(`#${ch.name}`);
+          uncategorized.push(`#${ch.name} (id:${ch.id})`);
         }
       }
 
