@@ -40,10 +40,23 @@ exists, that's your first run — read it, follow it, then delete it.
 ## Working Rules
 
 - Prefer small, auditable changes (nanoclaw-style).
-- Commit after `pnpm build` is green for a logical unit of work.
 - Commit regularly — don't batch an entire session into one commit.
-- After completing a task, offer to push to the remote.
-- End of task: `git status --short` must be clean or intentionally staged.
+- Keep the git tree clean. After every task, follow the dev workflow below.
+
+## Dev Workflow
+
+After completing a unit of work:
+
+1. **Build** — `pnpm build` (must be clean, no errors)
+2. **Test** — `pnpm test` (all tests must pass)
+3. **Commit** — stage only relevant files, write a clear commit message
+4. **Push** — `git push` to remote
+5. **Deploy** (if the change affects runtime behavior):
+   - `systemctl --user restart discoclaw.service`
+   - `journalctl --user -u discoclaw.service -n 20` — verify startup
+6. **Verify** — `git status --short` must be clean
+
+Skip deploy for test-only, docs-only, or template-only changes.
 
 ## Commands
 
@@ -51,12 +64,4 @@ exists, that's your first run — read it, follow it, then delete it.
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests
-```
-
-## Deploy
-
-```bash
-pnpm build
-systemctl --user restart discoclaw.service
-journalctl --user -u discoclaw.service -f   # tail logs to verify
 ```
