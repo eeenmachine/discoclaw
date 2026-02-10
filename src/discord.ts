@@ -92,7 +92,7 @@ async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<st
   return dir;
 }
 
-function splitDiscord(text: string, limit = 2000): string[] {
+export function splitDiscord(text: string, limit = 2000): string[] {
   // Minimal fence-safe markdown chunking.
   const normalized = text.replace(/\r\n?/g, '\n');
   if (normalized.length <= limit) return [normalized];
@@ -175,7 +175,7 @@ function splitDiscord(text: string, limit = 2000): string[] {
   return chunks.filter((c) => c.trim().length > 0);
 }
 
-function truncateCodeBlocks(text: string, maxLines = 20): string {
+export function truncateCodeBlocks(text: string, maxLines = 20): string {
   // Truncate fenced code blocks that exceed maxLines, keeping first/last lines.
   return text.replace(/^([ \t]*```[^\n]*\n)([\s\S]*?)(^[ \t]*```[ \t]*$)/gm, (_match, open: string, body: string, close: string) => {
     const lines = body.split('\n');

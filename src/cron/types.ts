@@ -1,0 +1,18 @@
+import type { Cron } from 'croner';
+
+export type ParsedCronDef = {
+  schedule: string;   // 5-field cron expression (e.g., "0 7 * * 1-5")
+  timezone: string;   // IANA timezone (e.g., "America/Los_Angeles"), default "UTC"
+  channel: string;    // target channel name or ID (e.g., "general")
+  prompt: string;     // the instruction text for the runtime
+};
+
+export type CronJob = {
+  id: string;         // unique job ID (thread ID)
+  threadId: string;   // Discord forum thread ID
+  guildId: string;    // guild that owns this cron
+  name: string;       // thread name (human-readable job name)
+  def: ParsedCronDef;
+  cron: Cron | null;  // croner instance (null when disabled)
+  running: boolean;   // overlap guard
+};

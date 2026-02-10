@@ -83,6 +83,9 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Max durable items per user |
 | `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `1` | Enable `!memory` commands (show/remember/forget/reset) |
 | `DISCOCLAW_STATUS_CHANNEL` | *(empty — disabled)* | Channel name or ID for status embeds (bot online/offline, errors) |
+| `DISCOCLAW_CRON_ENABLED` | `0` | Master switch for the cron subsystem (forum-based scheduled tasks) |
+| `DISCOCLAW_CRON_FORUM` | *(empty)* | Forum channel name or ID for cron definitions |
+| `DISCOCLAW_CRON_MODEL` | `haiku` | Model used to parse natural-language cron definitions |
 
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).

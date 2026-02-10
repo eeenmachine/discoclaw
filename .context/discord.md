@@ -93,6 +93,23 @@ Fail-open: if the channel is not found or the env var is unset, the bot works no
 
 Implementation: `src/discord/status-channel.ts`
 
+## Cron (Scheduled Tasks)
+When `DISCOCLAW_CRON_ENABLED=1` and `DISCOCLAW_CRON_FORUM` is set to a forum channel name or ID, Discoclaw runs a forum-based cron subsystem. Each forum thread is a cron job: the thread name is the job name, and the starter message is a natural-language definition that gets parsed by AI into a schedule, timezone, target channel, and prompt.
+
+Creating a cron: create a thread in the forum. The starter message should describe the schedule, target channel, and what to do (e.g., "Every weekday at 7am Pacific, check the weather for Portland OR and post a brief summary to #general."). The bot reacts with a checkmark and replies with the parsed schedule.
+
+Managing crons:
+- **Disable:** Archive the thread. The bot stops scheduling.
+- **Enable:** Unarchive the thread. The bot re-parses and resumes.
+- **Edit:** Edit the starter message. The bot re-parses on the next `messageUpdate`.
+- **Delete:** Delete the thread. The bot removes the job.
+
+Cron responses are posted to the target channel only (threads stay clean as config). Discord actions are supported in cron responses if the master switch is enabled. Failures are posted to the status channel.
+
+Overlap protection: if a previous run for the same job is still active, the next tick is skipped.
+
+Implementation: `src/cron/`
+
 ## Group CWD Mode
 If `USE_GROUP_DIR_CWD=1`:
 - CWD becomes `groups/<sessionKey>/` for that Discord context.

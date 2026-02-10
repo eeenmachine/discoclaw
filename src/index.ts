@@ -11,6 +11,10 @@ import { loadDiscordChannelContext } from './discord/channel-context.js';
 import { startDiscordBot } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
+import { CronScheduler } from './cron/scheduler.js';
+import { executeCronJob } from './cron/executor.js';
+import { initCronForum } from './cron/forum-sync.js';
+import type { ActionCategoryFlags } from './discord/actions.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -57,8 +61,10 @@ try {
 }
 
 let botStatus: StatusPoster | null = null;
+let cronScheduler: CronScheduler | null = null;
 const shutdown = async () => {
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
+  cronScheduler?.stopAll();
   await botStatus?.offline();
   await releasePidLock(pidLockPath);
   process.exit(0);
@@ -104,6 +110,9 @@ const durableInjectMaxChars = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_I
 const durableMaxItems = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_MAX_ITEMS ?? '200'));
 const memoryCommandsEnabled = (process.env.DISCOCLAW_MEMORY_COMMANDS_ENABLED ?? '1') === '1';
 const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || undefined;
+const cronEnabled = (process.env.DISCOCLAW_CRON_ENABLED ?? '0') === '1';
+const cronForum = (process.env.DISCOCLAW_CRON_FORUM ?? '').trim() || undefined;
+const cronModel = (process.env.DISCOCLAW_CRON_MODEL ?? 'haiku').trim() || 'haiku';
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
   process.exit(1);
@@ -170,7 +179,7 @@ const runtime = createClaudeCliRuntime({
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
-const { status } = await startDiscordBot({
+const { client, status } = await startDiscordBot({
   token,
   allowUserIds,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
@@ -208,5 +217,46 @@ const { status } = await startDiscordBot({
   statusChannel,
 });
 botStatus = status;
+
+// --- Cron subsystem ---
+if (cronEnabled && cronForum) {
+  const actionFlags: ActionCategoryFlags = {
+    channels: discordActionsChannels,
+    messaging: discordActionsMessaging,
+    guild: discordActionsGuild,
+    moderation: discordActionsModeration,
+    polls: discordActionsPolls,
+  };
+
+  const cronExecCtx = {
+    client,
+    runtime,
+    model: runtimeModel,
+    cwd: workspaceCwd,
+    timeoutMs: runtimeTimeoutMs,
+    status: botStatus,
+    log,
+    discordActionsEnabled,
+    actionFlags,
+  };
+
+  cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);
+
+  try {
+    await initCronForum({
+      client,
+      forumChannelNameOrId: cronForum,
+      scheduler: cronScheduler,
+      runtime,
+      cronModel,
+      cwd: workspaceCwd,
+      log,
+    });
+  } catch (err) {
+    log.error({ err }, 'cron:forum init failed');
+  }
+} else if (cronEnabled && !cronForum) {
+  log.warn('DISCOCLAW_CRON_ENABLED=1 but DISCOCLAW_CRON_FORUM is not set; cron subsystem disabled');
+}
 
 log.info('Discord bot started');
