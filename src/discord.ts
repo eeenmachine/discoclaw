@@ -21,10 +21,15 @@ import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
 import { loadWorkspacePermissions, resolveTools } from './workspace-permissions.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
+import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
+import type { SystemScaffold } from './discord/system-bootstrap.js';
 
 export type BotParams = {
   token: string;
   allowUserIds: Set<string>;
+  // If set and the bot is in multiple guilds, selects the guild used for system bootstrap.
+  // If unset and the bot is in exactly one guild, that guild is used.
+  guildId?: string;
   // If set, restricts non-DM messages to these channel IDs (or thread parent IDs).
   // If unset, all channels are allowed (user allowlist still applies).
   allowChannelIds?: Set<string>;
@@ -65,6 +70,7 @@ export type BotParams = {
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
   statusChannel?: string;
+  bootstrapEnsureBeadsForum?: boolean;
   toolAwareStreaming?: boolean;
   actionFollowupDepth: number;
 };
@@ -237,20 +243,20 @@ export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): 
 export type StatusRef = { current: StatusPoster | null };
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
-  const actionFlags: ActionCategoryFlags = {
-    channels: params.discordActionsChannels,
-    messaging: params.discordActionsMessaging,
-    guild: params.discordActionsGuild,
-    moderation: params.discordActionsModeration,
-    polls: params.discordActionsPolls,
-    beads: params.discordActionsBeads,
-  };
-
   return async (msg: any) => {
     try {
       if (!msg?.author || msg.author.bot) return;
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
+
+      const actionFlags: ActionCategoryFlags = {
+        channels: params.discordActionsChannels,
+        messaging: params.discordActionsMessaging,
+        guild: params.discordActionsGuild,
+        moderation: params.discordActionsModeration,
+        polls: params.discordActionsPolls,
+        beads: params.discordActionsBeads,
+      };
 
       const isDm = msg.guildId == null;
       if (!isDm && params.allowChannelIds) {
@@ -713,7 +719,14 @@ function resolveStatusChannel(client: Client, nameOrId: string, log?: LoggerLike
   return null;
 }
 
-export async function startDiscordBot(params: BotParams): Promise<{ client: Client; status: StatusPoster | null }> {
+async function resolveStatusChannelById(client: Client, channelId: string, log?: LoggerLike): Promise<StatusPoster | null> {
+  const cached = client.channels.cache.get(channelId);
+  const ch = cached ?? await client.channels.fetch(channelId).catch(() => null);
+  if (ch?.isTextBased() && !ch.isDMBased()) return createStatusPoster(ch as any, log);
+  return null;
+}
+
+export async function startDiscordBot(params: BotParams): Promise<{ client: Client; status: StatusPoster | null; system: SystemScaffold | null }> {
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -759,6 +772,21 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     }
   });
 
+  // Ensure "System" category scaffold (status/crons/beads) in a single target guild.
+  let system: SystemScaffold | null = null;
+  try {
+    const guild = selectBootstrapGuild(client, params.guildId, params.log);
+    if (guild) {
+      system = await ensureSystemScaffold(
+        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum) },
+        params.log,
+      );
+    }
+  } catch (err) {
+    params.log?.warn({ err }, 'system-bootstrap: failed; continuing without scaffold');
+    system = null;
+  }
+
   if (params.statusChannel) {
     statusRef.current = resolveStatusChannel(client, params.statusChannel, params.log);
     if (statusRef.current) {
@@ -767,7 +795,15 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     } else {
       params.log?.warn({ statusChannel: params.statusChannel }, 'status-channel: channel not found, status posting disabled');
     }
+  } else if (system?.statusChannelId) {
+    statusRef.current = await resolveStatusChannelById(client, system.statusChannelId, params.log);
+    if (statusRef.current) {
+      // eslint-disable-next-line @typescript-eslint/no-floating-promises
+      statusRef.current.online();
+    } else {
+      params.log?.warn({ statusChannelId: system.statusChannelId }, 'status-channel: bootstrapped channel not found, status posting disabled');
+    }
   }
 
-  return { client, status: statusRef.current };
+  return { client, status: statusRef.current, system };
 }

@@ -117,6 +117,7 @@ const durableMaxItems = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_MAX_ITE
 const memoryCommandsEnabled = (process.env.DISCOCLAW_MEMORY_COMMANDS_ENABLED ?? '1') === '1';
 const actionFollowupDepth = Math.max(0, Number(process.env.DISCOCLAW_ACTION_FOLLOWUP_DEPTH ?? '3'));
 const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || undefined;
+const guildId = (process.env.DISCORD_GUILD_ID ?? '').trim() || undefined;
 const cronEnabled = (process.env.DISCOCLAW_CRON_ENABLED ?? '0') === '1';
 const cronForum = (process.env.DISCOCLAW_CRON_FORUM ?? '').trim() || undefined;
 const cronModel = (process.env.DISCOCLAW_CRON_MODEL ?? 'haiku').trim() || 'haiku';
@@ -212,38 +213,19 @@ const runtime = createClaudeCliRuntime({
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
-// --- Build BeadContext if beads enabled ---
-let beadCtx: BeadContext | undefined;
-if (beadsEnabled && beadsForum) {
+// Pre-flight: detect whether the bd CLI is installed (used to decide whether to bootstrap the beads forum).
+let bdAvailable = false;
+let bdVersion: string | undefined;
+if (beadsEnabled) {
   const bd = await checkBdAvailable();
-  if (!bd.available) {
-    log.warn(
-      'DISCOCLAW_BEADS_ENABLED=1 but the bd CLI was not found. ' +
-      'Beads is a task-tracking system that syncs with Discord forum threads. ' +
-      'It requires the `bd` binary (set BD_BIN to a custom path if needed). ' +
-      'Beads subsystem disabled.',
-    );
-  } else {
-    const tagMap = await loadTagMap(beadsTagMapPath);
-    beadCtx = {
-      beadsCwd,
-      forumId: beadsForum,
-      tagMap,
-      runtime,
-      autoTag: beadsAutoTag,
-      autoTagModel: beadsAutoTagModel,
-      mentionUserId: beadsMentionUser,
-      log,
-    };
-    log.info({ beadsCwd, beadsForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag, bdVersion: bd.version }, 'beads:initialized');
-  }
-} else if (beadsEnabled && !beadsForum) {
-  log.warn('DISCOCLAW_BEADS_ENABLED=1 but DISCOCLAW_BEADS_FORUM is not set; beads subsystem disabled');
+  bdAvailable = bd.available;
+  bdVersion = bd.version;
 }
 
-const { client, status } = await startDiscordBot({
+const botParams = {
   token,
   allowUserIds,
+  guildId,
   allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
   log,
   discordChannelContext,
@@ -265,8 +247,9 @@ const { client, status } = await startDiscordBot({
   discordActionsGuild,
   discordActionsModeration,
   discordActionsPolls,
-  discordActionsBeads: discordActionsBeads && beadsEnabled,
-  beadCtx,
+  // Enable beads actions only after beadCtx is configured.
+  discordActionsBeads: false,
+  beadCtx: undefined as BeadContext | undefined,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,
@@ -279,20 +262,60 @@ const { client, status } = await startDiscordBot({
   durableMaxItems,
   memoryCommandsEnabled,
   statusChannel,
+  bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
   toolAwareStreaming,
   actionFollowupDepth,
-});
+};
+
+const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
 
+// --- Configure beads context after bootstrap (so the forum can be auto-created) ---
+let beadCtx: BeadContext | undefined;
+if (beadsEnabled) {
+  if (!bdAvailable) {
+    log.warn(
+      'DISCOCLAW_BEADS_ENABLED=1 but the bd CLI was not found. ' +
+      'Beads is a task-tracking system that syncs with Discord forum threads. ' +
+      'It requires the `bd` binary (set BD_BIN to a custom path if needed). ' +
+      'Beads subsystem disabled.',
+    );
+  } else {
+    const effectiveForum = beadsForum || system?.beadsForumId || '';
+    if (!effectiveForum) {
+      log.warn('DISCOCLAW_BEADS_ENABLED=1 but no beads forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_BEADS_FORUM); beads subsystem disabled');
+    } else {
+      const tagMap = await loadTagMap(beadsTagMapPath);
+      beadCtx = {
+        beadsCwd,
+        forumId: effectiveForum,
+        tagMap,
+        runtime,
+        autoTag: beadsAutoTag,
+        autoTagModel: beadsAutoTagModel,
+        mentionUserId: beadsMentionUser,
+        log,
+      };
+      botParams.beadCtx = beadCtx;
+      botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
+      log.info(
+        { beadsCwd, beadsForum: effectiveForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag, bdVersion },
+        'beads:initialized',
+      );
+    }
+  }
+}
+
 // --- Cron subsystem ---
-if (cronEnabled && cronForum) {
+const effectiveCronForum = cronForum || system?.cronsForumId || undefined;
+if (cronEnabled && effectiveCronForum) {
   const actionFlags: ActionCategoryFlags = {
     channels: discordActionsChannels,
     messaging: discordActionsMessaging,
     guild: discordActionsGuild,
     moderation: discordActionsModeration,
     polls: discordActionsPolls,
-    beads: discordActionsBeads && beadsEnabled,
+    beads: discordActionsBeads && beadsEnabled && Boolean(beadCtx),
   };
 
   const cronExecCtx = {
@@ -315,7 +338,7 @@ if (cronEnabled && cronForum) {
   try {
     await initCronForum({
       client,
-      forumChannelNameOrId: cronForum,
+      forumChannelNameOrId: effectiveCronForum,
       scheduler: cronScheduler,
       runtime,
       cronModel,
@@ -326,8 +349,8 @@ if (cronEnabled && cronForum) {
   } catch (err) {
     log.error({ err }, 'cron:forum init failed');
   }
-} else if (cronEnabled && !cronForum) {
-  log.warn('DISCOCLAW_CRON_ENABLED=1 but DISCOCLAW_CRON_FORUM is not set; cron subsystem disabled');
+} else if (cronEnabled && !effectiveCronForum) {
+  log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
 }
 
 log.info('Discord bot started');

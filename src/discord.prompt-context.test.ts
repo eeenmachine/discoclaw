@@ -226,6 +226,65 @@ describe('prompt includes correct context file paths', () => {
   });
 });
 
+describe('discord action flags are not frozen at handler creation', () => {
+  it('beads prompt section appears after toggling discordActionsBeads on the same params object', async () => {
+    const queue = makeQueue();
+    const prompts: string[] = [];
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        prompts.push(p.prompt);
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const params: any = {
+      allowUserIds: new Set(['123']),
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: '/tmp',
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordActionsEnabled: true,
+      discordActionsChannels: false,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsBeads: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: false,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: '/tmp/summaries',
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
+    };
+
+    const handler = createMessageCreateHandler(params, queue);
+
+    await handler(makeMsg({ channelId: 'chan', content: 'first' }));
+    expect(prompts[0]).toContain('## Discord Actions');
+    expect(prompts[0]).not.toContain('beadCreate');
+
+    params.discordActionsBeads = true;
+    await handler(makeMsg({ channelId: 'chan', content: 'second' }));
+    expect(prompts[1]).toContain('## Discord Actions');
+    expect(prompts[1]).toContain('beadCreate');
+  });
+});
+
 describe('durable memory injection into prompt', () => {
   it('injects durable section when enabled and store has items', async () => {
     const queue = makeQueue();
