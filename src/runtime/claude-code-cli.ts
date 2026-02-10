@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { execa } from 'execa';
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from './types.js';
+import { SessionFileScanner } from './session-scanner.js';
 
 function extractTextFromUnknownEvent(evt: unknown): string | null {
   if (!evt || typeof evt !== 'object') return null;
@@ -77,6 +78,8 @@ export type ClaudeCliRuntimeOpts = {
   strictMcpConfig?: boolean;
   // Optional logger for pre-invocation debug output.
   log?: { debug(...args: unknown[]): void };
+  // If true, scan Claude Code's JSONL session file to emit tool_start/tool_end events.
+  sessionScanning?: boolean;
 };
 
 export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapter {
@@ -183,6 +186,17 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     };
     const wait = () => new Promise<void>((r) => { notify = r; });
 
+    // Session file scanner: emit tool_start/tool_end from JSONL session log.
+    let scanner: SessionFileScanner | null = null;
+    if (opts.sessionScanning && params.sessionId) {
+      scanner = new SessionFileScanner(
+        { sessionId: params.sessionId, cwd: params.cwd, log: opts.log },
+        { onEvent: push },
+      );
+      // Fire-and-forget: scanner degrades gracefully if file never appears.
+      scanner.start().catch(() => {});
+    }
+
     let mergedStdout = '';
     let merged = '';
     let resultText = '';  // fallback from "result" event if no deltas were extracted
@@ -261,6 +275,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
       if (!procResult) return;
       if (!stdoutEnded) return;
       if (!stderrEnded) return;
+
+      scanner?.stop();
 
       const exitCode = procResult.exitCode;
       const stdout = procResult.stdout ?? '';
