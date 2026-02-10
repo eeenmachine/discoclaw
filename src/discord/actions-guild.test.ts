@@ -88,8 +88,17 @@ function makeCtx(overrides: Partial<any> = {}): ActionContext {
         },
       },
       scheduledEvents: {
-        fetch: vi.fn(async () => overrides.events ?? new Map()),
+        fetch: vi.fn(async (idOrUndefined?: string) => {
+          if (typeof idOrUndefined === 'string') {
+            const ev = (overrides.events as Map<string, any>)?.get(idOrUndefined);
+            if (!ev) throw new Error('not found');
+            return ev;
+          }
+          return overrides.events ?? new Map();
+        }),
         create: vi.fn(async (opts: any) => ({ name: opts.name })),
+        edit: vi.fn(async (_id: string, opts: any) => ({ name: opts.name ?? 'Edited Event' })),
+        delete: vi.fn(async () => {}),
       },
     } as any,
     client: {} as any,
@@ -267,5 +276,96 @@ describe('eventCreate', () => {
     );
 
     expect(result).toEqual({ ok: false, error: 'Invalid startTime: "not-a-date"' });
+  });
+});
+
+describe('eventEdit', () => {
+  it('edits an event name', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventEdit', eventId: 'e1', name: 'New Name' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Edited event "New Name"' });
+    expect((ctx.guild as any).scheduledEvents.edit).toHaveBeenCalledWith('e1', { name: 'New Name' });
+  });
+
+  it('edits multiple fields', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventEdit', eventId: 'e1', name: 'Updated', description: 'New desc', startTime: '2025-06-01T10:00:00Z' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const call = (ctx.guild as any).scheduledEvents.edit.mock.calls[0];
+    expect(call[0]).toBe('e1');
+    expect(call[1]).toMatchObject({ name: 'Updated', description: 'New desc' });
+    expect(call[1].scheduledStartTime).toBeDefined();
+  });
+
+  it('fails when no fields provided', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventEdit', eventId: 'e1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'eventEdit requires at least one field to update' });
+  });
+
+  it('fails with invalid startTime', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventEdit', eventId: 'e1', startTime: 'nope' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Invalid startTime: "nope"' });
+  });
+
+  it('fails with invalid endTime', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventEdit', eventId: 'e1', endTime: 'bad' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Invalid endTime: "bad"' });
+  });
+});
+
+describe('eventDelete', () => {
+  it('deletes an event and shows its name', async () => {
+    const events = new Map([
+      ['e1', { id: 'e1', name: 'Team Meeting' }],
+    ]);
+    const ctx = makeCtx({ events });
+
+    const result = await executeGuildAction(
+      { type: 'eventDelete', eventId: 'e1' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Deleted event "Team Meeting"' });
+    expect((ctx.guild as any).scheduledEvents.delete).toHaveBeenCalledWith('e1');
+  });
+
+  it('falls back to eventId when event not found for name', async () => {
+    const ctx = makeCtx({});
+
+    const result = await executeGuildAction(
+      { type: 'eventDelete', eventId: 'unknown-id' },
+      ctx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Deleted event "unknown-id"' });
+    expect((ctx.guild as any).scheduledEvents.delete).toHaveBeenCalledWith('unknown-id');
   });
 });

@@ -14,11 +14,13 @@ export type GuildActionRequest =
   | { type: 'roleRemove'; userId: string; role: string }
   | { type: 'searchMessages'; query: string; channel?: string; limit?: number }
   | { type: 'eventList' }
-  | { type: 'eventCreate'; name: string; startTime: string; endTime?: string; description?: string; channelId?: string; location?: string };
+  | { type: 'eventCreate'; name: string; startTime: string; endTime?: string; description?: string; channelId?: string; location?: string }
+  | { type: 'eventEdit'; eventId: string; name?: string; startTime?: string; endTime?: string; description?: string; location?: string }
+  | { type: 'eventDelete'; eventId: string };
 
 const GUILD_TYPE_MAP: Record<GuildActionRequest['type'], true> = {
   memberInfo: true, roleInfo: true, roleAdd: true, roleRemove: true,
-  searchMessages: true, eventList: true, eventCreate: true,
+  searchMessages: true, eventList: true, eventCreate: true, eventEdit: true, eventDelete: true,
 };
 export const GUILD_ACTION_TYPES = new Set<string>(Object.keys(GUILD_TYPE_MAP));
 
@@ -177,6 +179,39 @@ export async function executeGuildAction(
       const event = await guild.scheduledEvents.create(opts);
       return { ok: true, summary: `Created event "${event.name}"` };
     }
+
+    case 'eventEdit': {
+      const { eventId, name, startTime, endTime, description, location } = action;
+      if (!name && !startTime && !endTime && description === undefined && !location) {
+        return { ok: false, error: 'eventEdit requires at least one field to update' };
+      }
+
+      const edits: any = {};
+      if (name) edits.name = name;
+      if (description !== undefined) edits.description = description;
+      if (location) edits.entityMetadata = { location };
+
+      if (startTime) {
+        const d = new Date(startTime);
+        if (isNaN(d.getTime())) return { ok: false, error: `Invalid startTime: "${startTime}"` };
+        edits.scheduledStartTime = d.toISOString();
+      }
+      if (endTime) {
+        const d = new Date(endTime);
+        if (isNaN(d.getTime())) return { ok: false, error: `Invalid endTime: "${endTime}"` };
+        edits.scheduledEndTime = d.toISOString();
+      }
+
+      const event = await guild.scheduledEvents.edit(eventId, edits);
+      return { ok: true, summary: `Edited event "${event.name}"` };
+    }
+
+    case 'eventDelete': {
+      const event = await guild.scheduledEvents.fetch(action.eventId).catch(() => null);
+      const name = (event as any)?.name ?? action.eventId;
+      await guild.scheduledEvents.delete(action.eventId);
+      return { ok: true, summary: `Deleted event "${name}"` };
+    }
   }
 }
 
@@ -226,5 +261,22 @@ export function guildActionsPromptSection(): string {
 - \`endTime\` (optional): ISO 8601 datetime.
 - \`description\` (optional): Event description.
 - \`channelId\` (optional): Voice channel ID for voice events.
-- \`location\` (optional): External location (creates an external event).`;
+- \`location\` (optional): External location (creates an external event).
+
+**eventEdit** — Edit a scheduled event:
+\`\`\`
+<discord-action>{"type":"eventEdit","eventId":"123","name":"New Name","startTime":"2025-03-01T10:00:00Z"}</discord-action>
+\`\`\`
+- \`eventId\` (required): Event ID (from eventList).
+- \`name\` (optional): New event name.
+- \`startTime\` (optional): New ISO 8601 start time.
+- \`endTime\` (optional): New ISO 8601 end time.
+- \`description\` (optional): New description.
+- \`location\` (optional): New external location.
+At least one field besides eventId is required.
+
+**eventDelete** — Delete a scheduled event (destructive — confirm with user first):
+\`\`\`
+<discord-action>{"type":"eventDelete","eventId":"123"}</discord-action>
+\`\`\``;
 }
