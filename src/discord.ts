@@ -18,6 +18,7 @@ import { loadDurableMemory, selectItemsForInjection, formatDurableSection } from
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
+import { loadWorkspacePermissions, resolveTools } from './workspace-permissions.js';
 
 export type BotParams = {
   token: string;
@@ -432,17 +433,24 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             maybeEdit(true);
           }, 5000);
 
+          const permissions = await loadWorkspacePermissions(params.workspaceCwd, params.log);
+          const effectiveTools = resolveTools(permissions, params.runtimeTools);
+          if (permissions?.note) {
+            prompt += `\n\n---\nPermission note: ${permissions.note}\n`;
+          }
+
           params.log?.info(
             {
               sessionKey,
               sessionId,
               cwd,
               model: params.runtimeModel,
-              toolsCount: params.runtimeTools.length,
+              toolsCount: effectiveTools.length,
               timeoutMs: params.runtimeTimeoutMs,
               channelId: channelCtx.channelId,
               channelName: channelCtx.channelName,
               hasChannelContext: Boolean(channelCtx.contextPath),
+              permissionTier: permissions?.tier ?? 'env',
             },
             'invoke:start',
           );
@@ -452,7 +460,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             cwd,
             addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
             sessionId,
-            tools: params.runtimeTools,
+            tools: effectiveTools,
             timeoutMs: params.runtimeTimeoutMs,
           })) {
             if (evt.type === 'text_final') {

@@ -31,3 +31,21 @@ See: `src/runtime/types.ts`
 - If/when we add OpenAI/Gemini adapters:
   - Start with **analysis-only** routes (no tools).
   - Add a tool layer only if we explicitly decide we need full parity.
+
+## Per-Workspace Permissions
+- `workspace/PERMISSIONS.json` controls the tool surface per workspace.
+- Loaded per-invocation from `src/workspace-permissions.ts`.
+- If the file doesn't exist, falls back to the `RUNTIME_TOOLS` env var (fully backward compatible).
+
+Tiers:
+| Tier | Tools |
+|------|-------|
+| `readonly` | `Read, WebSearch, WebFetch` |
+| `standard` | `Read, Edit, WebSearch, WebFetch` |
+| `full` | `Bash, Read, Edit, WebSearch, WebFetch` |
+| `custom` | User-specified `tools` array in the JSON |
+
+Example: `{ "tier": "standard", "note": "Never modify files outside workspace." }`
+
+The optional `note` field is injected into the prompt as a soft behavioral constraint.
+Custom tier example: `{ "tier": "custom", "tools": ["Read", "Edit", "Bash"] }`

@@ -36,6 +36,22 @@ Then open `SOUL.md` together and talk about:
 
 Write it down. Make it real.
 
+## Access & Permissions
+
+Before wrapping up, set your access level. Ask something like:
+
+> "One more thing — how much access should I have on your machine?"
+
+Explain the options:
+- **readonly** — I can read files and search the web, but not change anything
+- **standard** — I can read and edit files, but no shell commands
+- **full** — Full access including running commands (for power users)
+
+Then create `PERMISSIONS.json` with their choice:
+```json
+{ "tier": "standard" }
+```
+
 ## When You're Done
 
 Delete this file. You don't need a bootstrap script anymore — you're you now.
