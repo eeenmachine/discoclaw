@@ -1,0 +1,217 @@
+import { describe, expect, it, vi } from 'vitest';
+import { BEAD_ACTION_TYPES, executeBeadAction, beadActionsPromptSection } from './actions-beads.js';
+import type { BeadContext } from './actions-beads.js';
+import type { ActionContext } from './actions.js';
+
+// ---------------------------------------------------------------------------
+// Mocks — override bd-cli and discord-sync modules
+// ---------------------------------------------------------------------------
+
+vi.mock('../beads/bd-cli.js', () => ({
+  bdShow: vi.fn(async (id: string) => {
+    if (id === 'ws-notfound') return null;
+    return {
+      id,
+      title: 'Test bead',
+      description: 'A test',
+      status: 'open',
+      priority: 2,
+      issue_type: 'task',
+      owner: '',
+      external_ref: 'discord:111222333',
+      labels: ['feature'],
+      comments: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+  }),
+  bdList: vi.fn(async () => [
+    { id: 'ws-001', title: 'First', status: 'open', priority: 2 },
+    { id: 'ws-002', title: 'Second', status: 'in_progress', priority: 1 },
+  ]),
+  bdCreate: vi.fn(async (params: any) => ({
+    id: 'ws-new',
+    title: params.title,
+    description: params.description ?? '',
+    status: 'open',
+    priority: params.priority ?? 2,
+    issue_type: 'task',
+    owner: '',
+    external_ref: '',
+    labels: params.labels ?? [],
+    comments: [],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  })),
+  bdUpdate: vi.fn(async () => {}),
+  bdClose: vi.fn(async () => {}),
+}));
+
+vi.mock('../beads/discord-sync.js', () => ({
+  resolveBeadsForum: vi.fn(() => ({
+    threads: {
+      create: vi.fn(async () => ({ id: 'thread-new' })),
+    },
+  })),
+  createBeadThread: vi.fn(async () => 'thread-new'),
+  closeBeadThread: vi.fn(async () => {}),
+  updateBeadThreadName: vi.fn(async () => {}),
+  ensureUnarchived: vi.fn(async () => {}),
+  getThreadIdFromBead: vi.fn((bead: any) => {
+    const ref = bead.external_ref ?? '';
+    if (ref.startsWith('discord:')) return ref.slice('discord:'.length);
+    return null;
+  }),
+}));
+
+vi.mock('../beads/auto-tag.js', () => ({
+  autoTagBead: vi.fn(async () => ['feature']),
+}));
+
+vi.mock('execa', () => ({
+  execa: vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
+}));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeCtx(): ActionContext {
+  return {
+    guild: {} as any,
+    client: {
+      channels: {
+        cache: {
+          get: () => undefined,
+        },
+      },
+    } as any,
+    channelId: 'test-channel',
+    messageId: 'test-message',
+  };
+}
+
+function makeBeadCtx(overrides?: Partial<BeadContext>): BeadContext {
+  return {
+    beadsCwd: '/tmp/test-beads',
+    forumId: 'forum-123',
+    tagMap: { feature: 'tag-1', bug: 'tag-2' },
+    runtime: { id: 'other', capabilities: new Set(), invoke: async function* () {} } as any,
+    autoTag: false,
+    autoTagModel: 'haiku',
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('BEAD_ACTION_TYPES', () => {
+  it('contains all bead action types', () => {
+    expect(BEAD_ACTION_TYPES.has('beadCreate')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('beadUpdate')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('beadClose')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('beadShow')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('beadList')).toBe(true);
+    expect(BEAD_ACTION_TYPES.has('beadSync')).toBe(true);
+  });
+
+  it('does not contain non-bead types', () => {
+    expect(BEAD_ACTION_TYPES.has('channelCreate')).toBe(false);
+  });
+});
+
+describe('executeBeadAction', () => {
+  it('beadCreate returns created bead summary', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadCreate', title: 'New task', priority: 1 },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('ws-new');
+    expect((result as any).summary).toContain('New task');
+  });
+
+  it('beadCreate fails without title', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadCreate', title: '' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('beadUpdate returns updated summary', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress', priority: 1 },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('ws-001');
+    expect((result as any).summary).toContain('in_progress');
+  });
+
+  it('beadUpdate fails without beadId', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadUpdate', beadId: '' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it('beadClose returns closed summary', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadClose', beadId: 'ws-001', reason: 'Done' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('ws-001');
+    expect((result as any).summary).toContain('Done');
+  });
+
+  it('beadShow returns bead details', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadShow', beadId: 'ws-001' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Test bead');
+    expect((result as any).summary).toContain('ws-001');
+  });
+
+  it('beadShow fails for unknown bead', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadShow', beadId: 'ws-notfound' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('not found');
+  });
+
+  it('beadList returns bead list', async () => {
+    const result = await executeBeadAction(
+      { type: 'beadList', status: 'open', limit: 10 },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('ws-001');
+    expect((result as any).summary).toContain('ws-002');
+  });
+});
+
+describe('beadActionsPromptSection', () => {
+  it('returns non-empty prompt section', () => {
+    const section = beadActionsPromptSection();
+    expect(section).toContain('beadCreate');
+    expect(section).toContain('beadClose');
+    expect(section).toContain('beadList');
+  });
+});

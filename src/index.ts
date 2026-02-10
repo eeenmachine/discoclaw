@@ -15,6 +15,8 @@ import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
 import { initCronForum } from './cron/forum-sync.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
+import type { BeadContext } from './discord/actions-beads.js';
+import { loadTagMap } from './beads/discord-sync.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -113,6 +115,7 @@ const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || und
 const cronEnabled = (process.env.DISCOCLAW_CRON_ENABLED ?? '0') === '1';
 const cronForum = (process.env.DISCOCLAW_CRON_FORUM ?? '').trim() || undefined;
 const cronModel = (process.env.DISCOCLAW_CRON_MODEL ?? 'haiku').trim() || 'haiku';
+
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
   process.exit(1);
@@ -125,6 +128,17 @@ const defaultWorkspaceCwd = dataDir
 const workspaceCwd = (process.env.WORKSPACE_CWD ?? '').trim() || defaultWorkspaceCwd;
 const groupsDir = (process.env.GROUPS_DIR ?? '').trim() || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
+
+// --- Beads subsystem ---
+const beadsEnabled = (process.env.DISCOCLAW_BEADS_ENABLED ?? '0') === '1';
+const beadsCwd = (process.env.DISCOCLAW_BEADS_CWD ?? '').trim() || workspaceCwd;
+const beadsForum = (process.env.DISCOCLAW_BEADS_FORUM ?? '').trim() || '';
+const beadsTagMapPath = (process.env.DISCOCLAW_BEADS_TAG_MAP ?? '').trim()
+  || path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
+const beadsMentionUser = (process.env.DISCOCLAW_BEADS_MENTION_USER ?? '').trim() || undefined;
+const beadsAutoTag = (process.env.DISCOCLAW_BEADS_AUTO_TAG ?? '1') === '1';
+const beadsAutoTagModel = (process.env.DISCOCLAW_BEADS_AUTO_TAG_MODEL ?? 'haiku').trim() || 'haiku';
+const discordActionsBeads = (process.env.DISCOCLAW_DISCORD_ACTIONS_BEADS ?? '0') === '1';
 
 const claudeBin = process.env.CLAUDE_BIN ?? 'claude';
 const dangerouslySkipPermissions = (process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS ?? '0') === '1';
@@ -179,6 +193,25 @@ const runtime = createClaudeCliRuntime({
 
 const sessionManager = new SessionManager(path.join(__dirname, '..', 'data', 'sessions.json'));
 
+// --- Build BeadContext if beads enabled ---
+let beadCtx: BeadContext | undefined;
+if (beadsEnabled && beadsForum) {
+  const tagMap = await loadTagMap(beadsTagMapPath);
+  beadCtx = {
+    beadsCwd,
+    forumId: beadsForum,
+    tagMap,
+    runtime,
+    autoTag: beadsAutoTag,
+    autoTagModel: beadsAutoTagModel,
+    mentionUserId: beadsMentionUser,
+    log,
+  };
+  log.info({ beadsCwd, beadsForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag }, 'beads:initialized');
+} else if (beadsEnabled && !beadsForum) {
+  log.warn('DISCOCLAW_BEADS_ENABLED=1 but DISCOCLAW_BEADS_FORUM is not set; beads subsystem disabled');
+}
+
 const { client, status } = await startDiscordBot({
   token,
   allowUserIds,
@@ -203,6 +236,8 @@ const { client, status } = await startDiscordBot({
   discordActionsGuild,
   discordActionsModeration,
   discordActionsPolls,
+  discordActionsBeads: discordActionsBeads && beadsEnabled,
+  beadCtx,
   messageHistoryBudget,
   summaryEnabled,
   summaryModel,
@@ -226,6 +261,7 @@ if (cronEnabled && cronForum) {
     guild: discordActionsGuild,
     moderation: discordActionsModeration,
     polls: discordActionsPolls,
+    beads: discordActionsBeads && beadsEnabled,
   };
 
   const cronExecCtx = {
@@ -238,6 +274,7 @@ if (cronEnabled && cronForum) {
     log,
     discordActionsEnabled,
     actionFlags,
+    beadCtx,
   };
 
   cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);

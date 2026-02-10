@@ -9,6 +9,8 @@ import { MODERATION_ACTION_TYPES, executeModerationAction, moderationActionsProm
 import type { ModerationActionRequest } from './actions-moderation.js';
 import { POLL_ACTION_TYPES, executePollAction, pollActionsPromptSection } from './actions-poll.js';
 import type { PollActionRequest } from './actions-poll.js';
+import { BEAD_ACTION_TYPES, executeBeadAction, beadActionsPromptSection } from './actions-beads.js';
+import type { BeadActionRequest, BeadContext } from './actions-beads.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +29,7 @@ export type ActionCategoryFlags = {
   guild: boolean;
   moderation: boolean;
   polls: boolean;
+  beads: boolean;
 };
 
 export type DiscordActionRequest =
@@ -34,7 +37,8 @@ export type DiscordActionRequest =
   | MessagingActionRequest
   | GuildActionRequest
   | ModerationActionRequest
-  | PollActionRequest;
+  | PollActionRequest
+  | BeadActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -53,6 +57,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.guild) for (const t of GUILD_ACTION_TYPES) types.add(t);
   if (flags.moderation) for (const t of MODERATION_ACTION_TYPES) types.add(t);
   if (flags.polls) for (const t of POLL_ACTION_TYPES) types.add(t);
+  if (flags.beads) for (const t of BEAD_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -91,6 +96,7 @@ export async function executeDiscordActions(
   actions: DiscordActionRequest[],
   ctx: ActionContext,
   log?: LoggerLike,
+  beadCtx?: BeadContext,
 ): Promise<DiscordActionResult[]> {
   const results: DiscordActionResult[] = [];
 
@@ -108,6 +114,12 @@ export async function executeDiscordActions(
         result = await executeModerationAction(action as ModerationActionRequest, ctx);
       } else if (POLL_ACTION_TYPES.has(action.type)) {
         result = await executePollAction(action as PollActionRequest, ctx);
+      } else if (BEAD_ACTION_TYPES.has(action.type)) {
+        if (!beadCtx) {
+          result = { ok: false, error: 'Beads subsystem not configured' };
+        } else {
+          result = await executeBeadAction(action as BeadActionRequest, ctx, beadCtx);
+        }
       } else {
         result = { ok: false, error: `Unknown action type: ${(action as any).type ?? 'unknown'}` };
       }
@@ -155,6 +167,10 @@ You can perform Discord server actions by including structured action blocks in 
 
   if (flags.polls) {
     sections.push(pollActionsPromptSection());
+  }
+
+  if (flags.beads) {
+    sections.push(beadActionsPromptSection());
   }
 
   sections.push(`### Rules

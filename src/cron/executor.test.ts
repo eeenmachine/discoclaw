@@ -85,7 +85,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     status: null,
     log: mockLog(),
     discordActionsEnabled: false,
-    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false },
+    actionFlags: { channels: false, messaging: false, guild: false, moderation: false, polls: false, beads: false },
     ...overrides,
   };
 }

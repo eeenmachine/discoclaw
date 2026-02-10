@@ -1,0 +1,135 @@
+import { execa } from 'execa';
+import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+const BD_BIN = process.env.BD_BIN || 'bd';
+
+// ---------------------------------------------------------------------------
+// JSON parsing helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse bd CLI JSON output. Handles:
+ *   - Array output (list, show)
+ *   - Single-object output (create)
+ *   - Markdown-fenced JSON (```json ... ```)
+ *   - Empty / error output
+ */
+export function parseBdJson<T = BeadData>(stdout: string): T[] {
+  let text = stdout.trim();
+  if (!text) return [];
+
+  // Strip markdown fences if present.
+  text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+  text = text.trim();
+  if (!text) return [];
+
+  const parsed = JSON.parse(text);
+  if (Array.isArray(parsed)) return parsed as T[];
+  if (parsed && typeof parsed === 'object') {
+    // bd returns { error: "..." } on failures.
+    if ('error' in parsed && Object.keys(parsed).length === 1) {
+      throw new Error(String(parsed.error));
+    }
+    return [parsed as T];
+  }
+  return [];
+}
+
+// ---------------------------------------------------------------------------
+// bd CLI wrappers
+// ---------------------------------------------------------------------------
+
+async function runBd(args: string[], cwd: string): Promise<string> {
+  const result = await execa(BD_BIN, args, { cwd, reject: false });
+  if (result.exitCode !== 0) {
+    // Try to extract a structured error from JSON output.
+    const out = (result.stdout ?? '').trim();
+    if (out) {
+      try {
+        const parsed = JSON.parse(out);
+        if (parsed?.error) throw new Error(String(parsed.error));
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          // Not JSON — fall through.
+        } else {
+          throw e;
+        }
+      }
+    }
+    const errText = (result.stderr ?? '').trim() || out || `bd exited with code ${result.exitCode}`;
+    throw new Error(errText);
+  }
+  return result.stdout;
+}
+
+/** Show a single bead by ID. Returns null if not found. */
+export async function bdShow(id: string, cwd: string): Promise<BeadData | null> {
+  try {
+    const stdout = await runBd(['show', '--json', id], cwd);
+    const items = parseBdJson<BeadData>(stdout);
+    return items[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** List beads matching the given filters. */
+export async function bdList(params: BeadListParams, cwd: string): Promise<BeadData[]> {
+  const args = ['list', '--json'];
+  if (params.status === 'all') {
+    args.push('--all');
+  } else if (params.status) {
+    args.push('--status', params.status);
+  }
+  if (params.label) args.push('--label', params.label);
+  if (params.limit) args.push('--limit', String(params.limit));
+
+  const stdout = await runBd(args, cwd);
+  const items = parseBdJson<BeadData>(stdout);
+
+  return items;
+}
+
+/** Create a new bead. Returns the created bead data. */
+export async function bdCreate(params: BeadCreateParams, cwd: string): Promise<BeadData> {
+  const args = ['create', '--json', params.title];
+  if (params.description) args.push('--description', params.description);
+  if (params.priority != null) args.push('--priority', String(params.priority));
+  if (params.issueType) args.push('--type', params.issueType);
+  if (params.owner) args.push('--assignee', params.owner);
+  if (params.labels?.length) args.push('--labels', params.labels.join(','));
+
+  const stdout = await runBd(args, cwd);
+  const items = parseBdJson<BeadData>(stdout);
+  if (!items[0]) throw new Error('bd create returned no data');
+  return items[0];
+}
+
+/** Update a bead's fields. */
+export async function bdUpdate(id: string, params: BeadUpdateParams, cwd: string): Promise<void> {
+  const args = ['update', id];
+  if (params.title) args.push('--title', params.title);
+  if (params.description) args.push('--description', params.description);
+  if (params.priority != null) args.push('--priority', String(params.priority));
+  if (params.status) args.push('--status', params.status);
+  if (params.owner) args.push('--assignee', params.owner);
+  if (params.externalRef) args.push('--external-ref', params.externalRef);
+
+  await runBd(args, cwd);
+}
+
+/** Close a bead. */
+export async function bdClose(id: string, reason: string | undefined, cwd: string): Promise<void> {
+  const args = ['close', id];
+  if (reason) args.push('--reason', reason);
+  await runBd(args, cwd);
+}
+
+/** Add a label to a bead. */
+export async function bdAddLabel(id: string, label: string, cwd: string): Promise<void> {
+  await runBd(['label', 'add', id, label], cwd);
+}

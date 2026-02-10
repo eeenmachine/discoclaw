@@ -10,6 +10,7 @@ import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from
 import { discordSessionKey } from './discord/session-key.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './discord/actions.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
+import type { BeadContext } from './discord/actions-beads.js';
 import type { LoggerLike } from './discord/action-types.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
@@ -47,6 +48,8 @@ export type BotParams = {
   discordActionsGuild: boolean;
   discordActionsModeration: boolean;
   discordActionsPolls: boolean;
+  discordActionsBeads: boolean;
+  beadCtx?: BeadContext;
   messageHistoryBudget: number;
   summaryEnabled: boolean;
   summaryModel: string;
@@ -218,6 +221,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
     guild: params.discordActionsGuild,
     moderation: params.discordActionsModeration,
     polls: params.discordActionsPolls,
+    beads: params.discordActionsBeads,
   };
 
   return async (msg: any) => {
@@ -473,7 +477,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelId: msg.channelId,
                 messageId: msg.id,
               };
-              const results = await executeDiscordActions(actions, actCtx, params.log);
+              const results = await executeDiscordActions(actions, actCtx, params.log, params.beadCtx);
               const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
               processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
               if (statusRef?.current) {

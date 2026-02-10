@@ -9,6 +9,7 @@ const ALL_FLAGS: ActionCategoryFlags = {
   guild: false,
   moderation: false,
   polls: false,
+  beads: false,
 };
 
 // ---------------------------------------------------------------------------

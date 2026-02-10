@@ -4,6 +4,7 @@ import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { ActionCategoryFlags } from '../discord/actions.js';
+import type { BeadContext } from '../discord/actions-beads.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
 import { splitDiscord, truncateCodeBlocks } from '../discord.js';
@@ -18,6 +19,7 @@ export type CronExecutorContext = {
   log?: LoggerLike;
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
+  beadCtx?: BeadContext;
 };
 
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
@@ -95,7 +97,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           channelId: targetChannel.id,
           messageId: '',
         };
-        const results = await executeDiscordActions(actions, actCtx, ctx.log);
+        const results = await executeDiscordActions(actions, actCtx, ctx.log, ctx.beadCtx);
         const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
         processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
 

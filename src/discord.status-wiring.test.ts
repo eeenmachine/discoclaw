@@ -44,6 +44,7 @@ function baseParams(runtimeOverride: any) {
     discordActionsGuild: false,
     discordActionsModeration: false,
     discordActionsPolls: false,
+    discordActionsBeads: false,
     messageHistoryBudget: 0,
     summaryEnabled: false,
     summaryModel: 'haiku',

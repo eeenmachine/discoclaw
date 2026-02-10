@@ -73,6 +73,7 @@ Each action category has its own flag (only active when the master switch is `1`
 | `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | memberInfo, roleInfo, roleAdd, roleRemove, searchMessages, eventList, eventCreate |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | timeout, kick, ban |
 | `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | poll |
+| `DISCOCLAW_DISCORD_ACTIONS_BEADS` | `0` | beadCreate, beadUpdate, beadClose, beadShow, beadList, beadSync |
 
 Requirements:
 - The bot needs appropriate permissions in the server (Manage Channels, Manage Roles, Moderate Members, etc.) depending on the actions used. These are server-level role permissions, not Developer Portal settings.
@@ -109,6 +110,29 @@ Cron responses are posted to the target channel only (threads stay clean as conf
 Overlap protection: if a previous run for the same job is still active, the next tick is skipped.
 
 Implementation: `src/cron/`
+
+## Beads (Task Tracking)
+When `DISCOCLAW_BEADS_ENABLED=1` and `DISCOCLAW_BEADS_FORUM` is set to a forum channel name or ID, Discoclaw integrates with the `bd` CLI (beads issue tracker) to sync tasks to Discord forum threads.
+
+Two paths produce the same Discord state:
+
+**CLI path** (developer at terminal): `scripts/beads/bd-wrapper.sh` intercepts `bd create/close/update/q` and fires hook scripts that create/update/archive Discord forum threads via curl.
+
+**Bot path** (AI via Discord action): `<discord-action>{"type":"beadCreate",...}` blocks are parsed and executed by `actions-beads.ts`, which calls `bd` via `bd-cli.ts` and syncs threads via `discord-sync.ts` (discord.js).
+
+Both use the `bd` binary for data storage and produce identical Discord thread state: emoji-prefixed thread names, auto-tagged forum tags, and archive-on-close behavior.
+
+Bead actions (requires `DISCOCLAW_DISCORD_ACTIONS=1` and `DISCOCLAW_DISCORD_ACTIONS_BEADS=1`):
+- `beadCreate` — create a bead + forum thread (auto-tagged if enabled)
+- `beadUpdate` — update bead fields + sync thread name/emoji
+- `beadClose` — close bead + post summary + archive thread
+- `beadShow` — show bead details
+- `beadList` — list beads with optional status/label filters
+- `beadSync` — run full 4-phase safety-net sync
+
+Data import: point `DISCOCLAW_BEADS_CWD` at an existing beads workspace (e.g., `~/Dropbox/weston`). Existing beads and their `external_ref` fields (thread IDs) work as-is since both bots share the same Discord guild.
+
+Implementation: `src/beads/`, `src/discord/actions-beads.ts`, `scripts/beads/`
 
 ## Group CWD Mode
 If `USE_GROUP_DIR_CWD=1`:

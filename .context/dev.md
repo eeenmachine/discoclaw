@@ -44,6 +44,7 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_DISCORD_ACTIONS_GUILD` | `0` | Guild info (memberInfo, roleInfo, roleAdd/Remove, events, search) |
 | `DISCOCLAW_DISCORD_ACTIONS_MODERATION` | `0` | Moderation (timeout, kick, ban) |
 | `DISCOCLAW_DISCORD_ACTIONS_POLLS` | `0` | Poll creation |
+| `DISCOCLAW_DISCORD_ACTIONS_BEADS` | `0` | Bead task tracking (create/update/close/show/list/sync) |
 
 ### Claude CLI
 | Variable | Default | Description |
@@ -86,6 +87,17 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_CRON_ENABLED` | `0` | Master switch for the cron subsystem (forum-based scheduled tasks) |
 | `DISCOCLAW_CRON_FORUM` | *(empty)* | Forum channel name or ID for cron definitions |
 | `DISCOCLAW_CRON_MODEL` | `haiku` | Model used to parse natural-language cron definitions |
+
+### Beads (Task Tracking)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_BEADS_ENABLED` | `0` | Master switch — loads beads module |
+| `DISCOCLAW_BEADS_CWD` | `WORKSPACE_CWD` | Working directory for bd CLI |
+| `DISCOCLAW_BEADS_FORUM` | *(empty)* | Forum channel name or ID for bead threads |
+| `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |
+| `DISCOCLAW_BEADS_MENTION_USER` | *(empty)* | User ID to @mention in new bead threads |
+| `DISCOCLAW_BEADS_AUTO_TAG` | `1` | Enable Haiku auto-tagging |
+| `DISCOCLAW_BEADS_AUTO_TAG_MODEL` | `haiku` | Model for auto-tagging |
 
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
