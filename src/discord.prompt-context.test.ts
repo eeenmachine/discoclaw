@@ -36,8 +36,7 @@ describe('prompt includes correct context file paths', () => {
       contentDir: '/content',
       indexPath: '/content/discord/DISCORD.md',
       baseDir: '/content/discord/base',
-      baseCorePath: '/content/discord/base/core.md',
-      baseSafetyPath: '/content/discord/base/safety.md',
+      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md'],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
       channelsDir: '/content/discord/channels',
@@ -60,6 +59,7 @@ describe('prompt includes correct context file paths', () => {
       autoJoinThreads: false,
       useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
+      discordActionsEnabled: false,
     }, queue);
 
     await handler(makeMsg({ channelId: 'chan' }));
@@ -85,8 +85,7 @@ describe('prompt includes correct context file paths', () => {
       contentDir: '/content',
       indexPath: '/content/discord/DISCORD.md',
       baseDir: '/content/discord/base',
-      baseCorePath: '/content/discord/base/core.md',
-      baseSafetyPath: '/content/discord/base/safety.md',
+      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md'],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
       channelsDir: '/content/discord/channels',
@@ -109,6 +108,7 @@ describe('prompt includes correct context file paths', () => {
       autoJoinThreads: false,
       useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
+      discordActionsEnabled: false,
     }, queue);
 
     await handler(makeMsg({
@@ -134,8 +134,7 @@ describe('prompt includes correct context file paths', () => {
       contentDir: '/content',
       indexPath: '/content/discord/DISCORD.md',
       baseDir: '/content/discord/base',
-      baseCorePath: '/content/discord/base/core.md',
-      baseSafetyPath: '/content/discord/base/safety.md',
+      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md'],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
       channelsDir: '/content/discord/channels',
@@ -158,6 +157,7 @@ describe('prompt includes correct context file paths', () => {
       autoJoinThreads: false,
       useRuntimeSessions: true,
       discordChannelContext: discordChannelContext as any,
+      discordActionsEnabled: false,
     }, queue);
 
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));

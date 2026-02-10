@@ -9,6 +9,7 @@ import { SessionManager } from './sessions.js';
 import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { loadDiscordChannelContext } from './discord/channel-context.js';
 import { startDiscordBot } from './discord.js';
+import { acquirePidLock, releasePidLock } from './pidlock.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -42,6 +43,25 @@ const runtimeTimeoutMsRaw = (process.env.RUNTIME_TIMEOUT_MS ?? '').trim();
 const runtimeTimeoutMs = runtimeTimeoutMsRaw ? Math.max(1, Number(runtimeTimeoutMsRaw)) : 10 * 60_000;
 
 const dataDir = process.env.DISCOCLAW_DATA_DIR;
+
+// --- PID lock: prevent duplicate bot instances ---
+const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
+const pidLockPath = path.join(pidLockDir, 'discoclaw.pid');
+try {
+  await fs.mkdir(pidLockDir, { recursive: true });
+  await acquirePidLock(pidLockPath);
+} catch (err) {
+  log.error({ err }, 'Failed to acquire PID lock');
+  process.exit(1);
+}
+
+const shutdown = async () => {
+  await releasePidLock(pidLockPath);
+  process.exit(0);
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
 const contentDir = (process.env.DISCOCLAW_CONTENT_DIR ?? '').trim() || (dataDir
   ? path.join(dataDir, 'content')
   : path.join(__dirname, '..', 'content'));
@@ -60,6 +80,7 @@ const requireChannelContext = (process.env.DISCORD_REQUIRE_CHANNEL_CONTEXT ?? '1
 const autoIndexChannelContext = (process.env.DISCORD_AUTO_INDEX_CHANNEL_CONTEXT ?? '1') === '1';
 const autoJoinThreads = (process.env.DISCORD_AUTO_JOIN_THREADS ?? '0') === '1';
 const useRuntimeSessions = (process.env.DISCOCLAW_RUNTIME_SESSIONS ?? '1') === '1';
+const discordActionsEnabled = (process.env.DISCOCLAW_DISCORD_ACTIONS ?? '0') === '1';
 if (requireChannelContext && !discordChannelContext) {
   log.error({ contentDir }, 'DISCORD_REQUIRE_CHANNEL_CONTEXT=1 but channel context failed to initialize');
   process.exit(1);
@@ -144,6 +165,7 @@ await startDiscordBot({
   runtimeModel,
   runtimeTools,
   runtimeTimeoutMs,
+  discordActionsEnabled,
 });
 
 log.info('Discord bot started');

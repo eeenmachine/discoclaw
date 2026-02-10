@@ -22,6 +22,9 @@ Strict mode:
 - `DISCORD_REQUIRE_CHANNEL_CONTEXT=1` (default): the bot requires a per-channel context file.
 - `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT=1` (default): when a message arrives for a new channel, Discoclaw appends it to `discord/DISCORD.md` and creates a blank stub file.
 
+Thread auto-join:
+- `DISCORD_AUTO_JOIN_THREADS=0` (default): best-effort auto-join threads so the bot can respond inside them. Private threads still require adding the bot manually.
+
 ## Session Keys
 - DM: `discord:dm:<authorId>`
 - Thread: `discord:thread:<threadId>` (if the incoming channel is a thread)
@@ -36,6 +39,18 @@ These session keys map to persisted UUIDs via `data/sessions.json`.
 ## Output Constraints
 - Discord has a ~2000 char limit per message.
 - Discoclaw chunks long replies and attempts to keep fenced code blocks renderable across splits.
+
+## Discord Actions
+When `DISCOCLAW_DISCORD_ACTIONS=1`, Claude can perform Discord server actions by emitting `<discord-action>` blocks in its response. After the runtime completes, Discoclaw parses these blocks, executes them via discord.js, strips the blocks from the displayed message, and appends results.
+
+Available actions:
+- `channelCreate` — Create a text channel (optionally under a category).
+- `channelList` — List all channels grouped by category.
+
+Requirements:
+- The bot needs **Manage Channels** permission in the server.
+- Only works in guild channels (not DMs).
+- Default off (`0`). Only allowlisted users can trigger actions.
 
 ## Group CWD Mode
 If `USE_GROUP_DIR_CWD=1`:

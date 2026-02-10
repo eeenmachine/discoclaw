@@ -27,20 +27,47 @@ pnpm migrate:weston-content -- --overwrite
 
 ## Environment
 
-- Copy `.env.example` -> `.env`
-- Required:
-  - `DISCORD_TOKEN`
-  - `DISCORD_ALLOW_USER_IDS` (comma/space-separated Discord user IDs; fail-closed if empty)
-- Useful:
-  - `DISCOCLAW_DATA_DIR=/path/to/dropbox/discoclaw-data` (defaults `WORKSPACE_CWD` to `$DISCOCLAW_DATA_DIR/workspace`)
-  - `DISCOCLAW_CONTENT_DIR=/path/to/content` (defaults to `$DISCOCLAW_DATA_DIR/content`)
-  - `WORKSPACE_CWD=/some/dir` (overrides the default)
-  - `CLAUDE_BIN=claude`
-  - `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1`
-  - `CLAUDE_OUTPUT_FORMAT=text` (switch to `stream-json` once the event schema is solid)
-- Group-scoped CWD (nanoclaw-style):
-  - `USE_GROUP_DIR_CWD=1`
-  - `GROUPS_DIR=./groups` (optional; defaults to `./groups`)
+Copy `.env.example` -> `.env`. See that file for inline comments.
+
+### Discord
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCORD_TOKEN` | **(required)** | Bot token |
+| `DISCORD_ALLOW_USER_IDS` | **(required)** | Comma/space-separated Discord user IDs; fail-closed if empty |
+| `DISCORD_CHANNEL_IDS` | *(empty — all channels)* | Restrict the bot to specific guild channel IDs (DMs still allowed) |
+| `DISCORD_REQUIRE_CHANNEL_CONTEXT` | `1` | Require a per-channel context file before responding |
+| `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT` | `1` | Auto-create stub context files for new channels |
+| `DISCORD_AUTO_JOIN_THREADS` | `0` | Best-effort auto-join threads so the bot can respond inside them |
+| `DISCOCLAW_DISCORD_ACTIONS` | `0` | Allow Claude to perform Discord server actions (channel create/list) |
+
+### Claude CLI
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CLAUDE_BIN` | `claude` | Path/name of the Claude CLI binary |
+| `CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS` | `0` | Pass `--dangerously-skip-permissions` to the CLI |
+| `CLAUDE_OUTPUT_FORMAT` | `text` | `text` or `stream-json` (preferred for smoother streaming) |
+| `CLAUDE_ECHO_STDIO` | `0` | Forward raw CLI stdout/stderr lines into Discord output |
+| `CLAUDE_DEBUG_FILE` | *(empty)* | Write Claude CLI debug logs to this file path |
+| `CLAUDE_STRICT_MCP_CONFIG` | `1` | Pass `--strict-mcp-config` to skip slow MCP plugin init |
+
+### App
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_DATA_DIR` | *(empty)* | Optional data root; sets default `WORKSPACE_CWD` to `$DISCOCLAW_DATA_DIR/workspace` |
+| `DISCOCLAW_CONTENT_DIR` | *(empty)* | Channel-context content dir; defaults to `$DISCOCLAW_DATA_DIR/content` |
+| `WORKSPACE_CWD` | `./workspace` | Runtime working directory (overrides the data-dir default) |
+| `GROUPS_DIR` | `./groups` | Base directory for per-session working dirs |
+| `USE_GROUP_DIR_CWD` | `0` | Enable nanoclaw-style group CWD per session |
+| `LOG_LEVEL` | `info` | Pino log level |
+| `DISCOCLAW_DEBUG_RUNTIME` | `0` | Dump resolved runtime config at startup (debugging systemd env issues) |
+
+### Runtime Invocation
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUNTIME_MODEL` | `opus` | Model name or alias passed to the CLI |
+| `RUNTIME_TOOLS` | `Bash,Read,Edit,WebSearch,WebFetch` | Comma-separated tool list |
+| `RUNTIME_TIMEOUT_MS` | `600000` | Per-invocation timeout in milliseconds |
+| `DISCOCLAW_RUNTIME_SESSIONS` | `1` | Persist Claude session IDs across messages |
 
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).

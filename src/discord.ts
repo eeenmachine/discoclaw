@@ -8,6 +8,7 @@ import { KeyedQueue } from './group-queue.js';
 import type { DiscordChannelContext } from './discord/channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { discordSessionKey } from './discord/session-key.js';
+import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './discord/actions.js';
 
 type LoggerLike = {
   info(obj: unknown, msg?: string): void;
@@ -38,6 +39,7 @@ export type BotParams = {
   runtimeModel: string;
   runtimeTools: string[];
   runtimeTimeoutMs: number;
+  discordActionsEnabled: boolean;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
@@ -152,6 +154,30 @@ function splitDiscord(text: string, limit = 2000): string[] {
   return chunks.filter((c) => c.trim().length > 0);
 }
 
+function truncateCodeBlocks(text: string, maxLines = 20): string {
+  // Truncate fenced code blocks that exceed maxLines, keeping first/last lines.
+  return text.replace(/^([ \t]*```[^\n]*\n)([\s\S]*?)(^[ \t]*```[ \t]*$)/gm, (_match, open: string, body: string, close: string) => {
+    const lines = body.split('\n');
+    // The last element after split is usually '' before the closing fence.
+    // Count only non-trivial lines (drop trailing empty from split).
+    const trimmedLines = lines.length > 0 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+    if (trimmedLines.length <= maxLines) return open + body + close;
+
+    const keepTop = Math.ceil(maxLines / 2);
+    const keepBottom = Math.floor(maxLines / 2);
+    const omitted = trimmedLines.length - keepTop - keepBottom;
+    const top = trimmedLines.slice(0, keepTop);
+    const bottom = trimmedLines.slice(trimmedLines.length - keepBottom);
+    return (
+      open +
+      top.join('\n') + '\n' +
+      `... (${omitted} lines omitted)\n` +
+      bottom.join('\n') + '\n' +
+      close
+    );
+  });
+}
+
 function renderDiscordTail(text: string, limit = 1900): string {
   // Render a "tail" view for streaming updates without exceeding Discord limits.
   const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
@@ -249,16 +275,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // Keep prompt small: link to the channel context file and instruct the runtime to read it.
           const contextFiles: string[] = [];
           if (params.discordChannelContext) {
-            contextFiles.push(params.discordChannelContext.baseCorePath);
-            contextFiles.push(params.discordChannelContext.baseSafetyPath);
+            contextFiles.push(...params.discordChannelContext.baseFiles);
           }
           if (channelCtx.contextPath) contextFiles.push(channelCtx.contextPath);
 
-          const prompt =
+          let prompt =
             `Context files (read with Read tool before responding, in order):\n` +
             contextFiles.map((p) => `- ${p}`).join('\n') +
             `\n\n---\nUser message:\n` +
             String(msg.content ?? '');
+
+          if (params.discordActionsEnabled && !isDm) {
+            prompt += '\n\n---\n' + discordActionsPromptSection();
+          }
 
           const addDirs: string[] = [];
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);
@@ -333,7 +362,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0 }, 'invoke:end');
           clearInterval(keepalive);
 
-          const outText = finalText || deltaText || '(no output)';
+          let processedText = finalText || deltaText || '(no output)';
+          if (params.discordActionsEnabled && msg.guild) {
+            const { cleanText, actions } = parseDiscordActions(processedText);
+            if (actions.length > 0) {
+              const results = await executeDiscordActions(actions, msg.guild, params.log);
+              const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
+              processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
+            } else {
+              processedText = cleanText;
+            }
+          }
+          const outText = truncateCodeBlocks(processedText);
           const chunks = splitDiscord(outText);
           await reply.edit(chunks[0] ?? '(no output)');
           for (const extra of chunks.slice(1)) {
