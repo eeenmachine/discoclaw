@@ -35,6 +35,7 @@ export async function autoTagBead(
     model: opts?.model ?? 'haiku',
     cwd: opts?.cwd ?? '.',
     timeoutMs: opts?.timeoutMs ?? 15_000,
+    tools: [],
   })) {
     if (evt.type === 'text_final') {
       finalText = evt.text;

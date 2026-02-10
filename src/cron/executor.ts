@@ -8,12 +8,14 @@ import type { BeadContext } from '../discord/actions-beads.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
 import { splitDiscord, truncateCodeBlocks } from '../discord.js';
+import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
 
 export type CronExecutorContext = {
   client: Client;
   runtime: RuntimeAdapter;
   model: string;
   cwd: string;
+  tools: string[];
   timeoutMs: number;
   status: StatusPoster | null;
   log?: LoggerLike;
@@ -55,7 +57,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       `Post your response to the Discord channel #${job.def.channel}. ` +
       `Keep your response concise and focused on the instruction above.`;
 
-    ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec start');
+    const permissions = await loadWorkspacePermissions(ctx.cwd, ctx.log);
+    const effectiveTools = resolveTools(permissions, ctx.tools);
+
+    ctx.log?.info(
+      { jobId: job.id, name: job.name, channel: job.def.channel, permissionTier: permissions?.tier ?? 'env' },
+      'cron:exec start',
+    );
 
     let finalText = '';
     let deltaText = '';
@@ -64,6 +72,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       model: ctx.model,
       cwd: ctx.cwd,
       timeoutMs: ctx.timeoutMs,
+      tools: effectiveTools,
     })) {
       if (evt.type === 'text_final') {
         finalText = evt.text;

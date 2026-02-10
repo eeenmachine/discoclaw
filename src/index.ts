@@ -273,6 +273,7 @@ if (cronEnabled && cronForum) {
     runtime,
     model: runtimeModel,
     cwd: workspaceCwd,
+    tools: runtimeTools,
     timeoutMs: runtimeTimeoutMs,
     status: botStatus,
     log,

@@ -33,6 +33,7 @@ export async function parseCronDefinition(
     model: opts?.model ?? 'haiku',
     cwd: opts?.cwd ?? process.cwd(),
     timeoutMs: opts?.timeoutMs ?? 30_000,
+    tools: [],
   })) {
     if (evt.type === 'text_final') {
       finalText = evt.text;

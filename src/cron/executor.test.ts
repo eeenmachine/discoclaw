@@ -81,6 +81,7 @@ function makeCtx(overrides?: Partial<CronExecutorContext>): CronExecutorContext 
     runtime: makeMockRuntime('Hello from cron!'),
     model: 'haiku',
     cwd: '/tmp',
+    tools: ['Bash', 'Read', 'Edit', 'WebSearch', 'WebFetch'],
     timeoutMs: 30_000,
     status: null,
     log: mockLog(),
