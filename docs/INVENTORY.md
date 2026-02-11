@@ -135,6 +135,7 @@ All actions are gated by category env flags (off by default except channels).
 | Bot setup guide | `docs/discord-bot-setup.md` | **done** |
 | Discord actions | `docs/discord-actions.md` | **done** |
 | Context modules | `.context/*.md` | **done** |
+| Token usage & efficiency | `docs/token-efficiency.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
 | README for new users | `README.md` | *needs rewrite for MVP audience* |
 
