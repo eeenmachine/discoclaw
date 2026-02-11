@@ -15,6 +15,7 @@ import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
 import { initCronForum } from './cron/forum-sync.js';
+import { CronRunControl } from './cron/run-control.js';
 import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
@@ -65,9 +66,11 @@ const dataDir = cfg.dataDir;
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
 const pidLockPath = path.join(pidLockDir, 'discoclaw.pid');
+const pidLockDirPath = `${pidLockPath}.lock`;
 try {
   await fs.mkdir(pidLockDir, { recursive: true });
   await acquirePidLock(pidLockPath);
+  log.info({ pidLockDir: pidLockDirPath }, 'PID lock acquired (lockdir backend)');
 } catch (err) {
   log.error({ err }, 'Failed to acquire PID lock');
   process.exit(1);
@@ -501,16 +504,18 @@ if (cronEnabled && effectiveCronForum) {
   const cronStatsPath = path.join(cronStatsDir, 'cron-run-stats.json');
   const cronStats = await loadRunStats(cronStatsPath);
 
-  const actionFlags: ActionCategoryFlags = {
+  const cronActionFlags: ActionCategoryFlags = {
     channels: discordActionsChannels,
     messaging: discordActionsMessaging,
     guild: discordActionsGuild,
     moderation: discordActionsModeration,
     polls: discordActionsPolls,
     beads: discordActionsBeads && beadsEnabled && Boolean(beadCtx),
-    crons: discordActionsCrons && cronEnabled,
+    // Prevent cron jobs from mutating cron state via emitted action blocks.
+    crons: false,
     botProfile: false, // Intentionally excluded from cron flows to avoid rate-limit and abuse issues.
   };
+  const cronRunControl = new CronRunControl();
 
   const cronPendingThreadIds = new Set<string>();
 
@@ -540,11 +545,12 @@ if (cronEnabled && effectiveCronForum) {
     log,
     allowChannelIds: restrictChannelIds ? allowChannelIds : undefined,
     discordActionsEnabled,
-    actionFlags,
+    actionFlags: cronActionFlags,
     beadCtx,
     cronCtx,
     statsStore: cronStats,
     lockDir: cronLocksDir,
+    runControl: cronRunControl,
   };
 
   cronScheduler = new CronScheduler((job) => executeCronJob(job, cronExecCtx), log);

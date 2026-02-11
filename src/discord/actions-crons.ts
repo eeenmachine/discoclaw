@@ -1,6 +1,4 @@
 import type { Client } from 'discord.js';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -8,7 +6,6 @@ import type { CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';
 import type { CronExecutorContext } from '../cron/executor.js';
 import { CADENCE_TAGS, generateCronId } from '../cron/run-stats.js';
-import { safeCronId } from '../cron/job-lock.js';
 import { detectCadence } from '../cron/cadence.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
@@ -70,6 +67,14 @@ export type CronContext = {
 
 function buildStarterContent(schedule: string, timezone: string, channel: string, prompt: string): string {
   return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${prompt}`;
+}
+
+function requestRunningJobCancel(cronCtx: CronContext, threadId: string, cronId: string): boolean {
+  const canceled = cronCtx.executorCtx?.runControl?.requestCancel(threadId) ?? false;
+  if (canceled) {
+    cronCtx.log?.info({ cronId, threadId }, 'cron:action requested cancel for in-flight run');
+  }
+  return canceled;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +361,7 @@ export async function executeCronAction(
       }
 
       cronCtx.scheduler.disable(record.threadId);
+      const canceled = requestRunningJobCancel(cronCtx, record.threadId, action.cronId);
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: true });
 
       // Post notification.
@@ -366,7 +372,7 @@ export async function executeCronAction(
         }
       } catch {}
 
-      return { ok: true, summary: `Cron ${action.cronId} paused` };
+      return { ok: true, summary: canceled ? `Cron ${action.cronId} paused (active run cancel requested)` : `Cron ${action.cronId} paused` };
     }
 
     case 'cronResume': {
@@ -403,6 +409,7 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
+      const canceled = requestRunningJobCancel(cronCtx, record.threadId, action.cronId);
       cronCtx.scheduler.unregister(record.threadId);
       await cronCtx.statsStore.removeRecord(action.cronId);
       cronCtx.forumCountSync?.requestUpdate();
@@ -417,11 +424,21 @@ export async function executeCronAction(
           await (thread as any).setArchived(true);
         } catch (err) {
           cronCtx.log?.warn({ err, cronId: action.cronId, threadId: record.threadId }, 'cron:action:delete archive failed');
-          return { ok: true, summary: `Cron ${action.cronId} deleted but thread could not be archived — archive it manually` };
+          return {
+            ok: true,
+            summary: canceled
+              ? `Cron ${action.cronId} deleted (active run cancel requested) but thread could not be archived — archive it manually`
+              : `Cron ${action.cronId} deleted but thread could not be archived — archive it manually`,
+          };
         }
       }
 
-      return { ok: true, summary: `Cron ${action.cronId} deleted and thread archived` };
+      return {
+        ok: true,
+        summary: canceled
+          ? `Cron ${action.cronId} deleted and thread archived (active run cancel requested)`
+          : `Cron ${action.cronId} deleted and thread archived`,
+      };
     }
 
     case 'cronTrigger': {
@@ -439,20 +456,11 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found in scheduler` };
       }
 
-      // Force: delete any existing file lock and clear in-memory guard before executing.
       if (action.force) {
-        const lockDir = cronCtx.executorCtx?.lockDir;
-        if (!lockDir) {
-          return { ok: false, error: 'force requires configured lockDir' };
-        }
-        const lockPath = path.join(lockDir, safeCronId(action.cronId) + '.lock');
-        try {
-          await fs.rm(lockPath, { recursive: true, force: true });
-          cronCtx.log?.info({ cronId: action.cronId }, 'cron:trigger force-deleted lock');
-        } catch (err) {
-          cronCtx.log?.warn({ err, cronId: action.cronId }, 'cron:trigger force lock delete failed');
-        }
-        job.running = false;
+        return {
+          ok: false,
+          error: 'cronTrigger force is disabled in Discord actions; use an admin terminal flow for break-glass overrides',
+        };
       }
 
       // Fire the executor (deferred import to avoid circular).
@@ -564,10 +572,7 @@ thread deletion can only be done manually through Discord.
 \`\`\`
 <discord-action>{"type":"cronTrigger","cronId":"cron-a1b2c3d4"}</discord-action>
 \`\`\`
-Force override (breaks lock even if another run is active — risk of overlap):
-\`\`\`
-<discord-action>{"type":"cronTrigger","cronId":"cron-a1b2c3d4","force":true}</discord-action>
-\`\`\`
+Note: \`force\` overrides are disabled in Discord actions.
 
 **cronSync** — Run full bidirectional sync:
 \`\`\`

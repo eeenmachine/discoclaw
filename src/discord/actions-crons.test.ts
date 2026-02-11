@@ -1,10 +1,6 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import os from 'node:os';
+import { describe, expect, it, vi } from 'vitest';
 import { executeCronAction, CRON_ACTION_TYPES } from './actions-crons.js';
-import { safeCronId } from '../cron/job-lock.js';
-import type { CronActionRequest, CronContext } from './actions-crons.js';
+import type { CronContext } from './actions-crons.js';
 import type { ActionContext } from './actions.js';
 import type { CronRunRecord, CronRunStats } from '../cron/run-stats.js';
 import type { CronScheduler } from '../cron/scheduler.js';
@@ -391,78 +387,32 @@ describe('executeCronAction', () => {
     if (!result.ok) expect(result.error).toContain('Missing Permissions');
   });
 
-  describe('cronTrigger force', () => {
-    let lockDir: string;
+  it('cronTrigger force is rejected in Discord actions', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronTrigger', cronId: 'cron-test0001', force: true },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('force is disabled');
+  });
 
-    beforeEach(async () => {
-      lockDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cron-force-test-'));
-    });
+  it('cronPause requests cancellation when a run is active', async () => {
+    const runControl = { requestCancel: vi.fn(() => true) };
+    const cronCtx = makeCronCtx({ executorCtx: { runControl } as any });
+    const result = await executeCronAction({ type: 'cronPause', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    expect(runControl.requestCancel).toHaveBeenCalledWith('thread-1');
+    if (result.ok) expect(result.summary).toContain('cancel requested');
+  });
 
-    afterEach(async () => {
-      await fs.rm(lockDir, { recursive: true, force: true });
-    });
-
-    it('returns error when force is true but lockDir is not configured', async () => {
-      const cronCtx = makeCronCtx();
-      // executorCtx exists but has no lockDir.
-      cronCtx.executorCtx = { lockDir: undefined } as any;
-      const result = await executeCronAction(
-        { type: 'cronTrigger', cronId: 'cron-test0001', force: true },
-        makeActionCtx(),
-        cronCtx,
-      );
-      expect(result.ok).toBe(false);
-      if (!result.ok) expect(result.error).toContain('force requires configured lockDir');
-    });
-
-    it('deletes existing lock directory when force is true', async () => {
-      const cronCtx = makeCronCtx();
-      cronCtx.executorCtx = { lockDir } as any;
-
-      // Pre-create a lock.
-      const lockPath = path.join(lockDir, safeCronId('cron-test0001') + '.lock');
-      await fs.mkdir(lockPath);
-      await fs.writeFile(path.join(lockPath, 'meta.json'), '{"pid":1,"token":"x"}');
-
-      const result = await executeCronAction(
-        { type: 'cronTrigger', cronId: 'cron-test0001', force: true },
-        makeActionCtx(),
-        cronCtx,
-      );
-      expect(result.ok).toBe(true);
-
-      // Lock dir should be gone.
-      await expect(fs.stat(lockPath)).rejects.toThrow();
-    });
-
-    it('succeeds even when no lock exists (no-op delete)', async () => {
-      const cronCtx = makeCronCtx();
-      cronCtx.executorCtx = { lockDir } as any;
-
-      const result = await executeCronAction(
-        { type: 'cronTrigger', cronId: 'cron-test0001', force: true },
-        makeActionCtx(),
-        cronCtx,
-      );
-      expect(result.ok).toBe(true);
-    });
-
-    it('clears job.running when force is true', async () => {
-      const cronCtx = makeCronCtx();
-      cronCtx.executorCtx = { lockDir } as any;
-
-      // Set the in-memory running flag on the job.
-      const job = cronCtx.scheduler.getJob('thread-1');
-      expect(job).toBeDefined();
-      job!.running = true;
-
-      const result = await executeCronAction(
-        { type: 'cronTrigger', cronId: 'cron-test0001', force: true },
-        makeActionCtx(),
-        cronCtx,
-      );
-      expect(result.ok).toBe(true);
-      expect(job!.running).toBe(false);
-    });
+  it('cronDelete requests cancellation when a run is active', async () => {
+    const runControl = { requestCancel: vi.fn(() => true) };
+    const cronCtx = makeCronCtx({ executorCtx: { runControl } as any });
+    const result = await executeCronAction({ type: 'cronDelete', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    expect(runControl.requestCancel).toHaveBeenCalledWith('thread-1');
+    if (result.ok) expect(result.summary).toContain('cancel requested');
   });
 });

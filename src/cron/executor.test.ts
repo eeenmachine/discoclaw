@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { executeCronJob } from './executor.js';
 import { safeCronId } from './job-lock.js';
+import { CronRunControl } from './run-control.js';
 import type { CronJob, ParsedCronDef } from './types.js';
 import type { CronExecutorContext } from './executor.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
@@ -253,6 +254,36 @@ describe('executeCronJob', () => {
     await executeCronJob(job, ctx);
 
     expect(job.running).toBe(false);
+  });
+
+  it('supports cancel requests via runControl', async () => {
+    const runControl = new CronRunControl();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: 'working...' };
+        await new Promise((r) => setTimeout(r, 50));
+        yield { type: 'text_final', text: 'done' };
+        yield { type: 'done' };
+      },
+    };
+    const ctx = makeCtx({ runtime, runControl });
+    const job = makeJob();
+
+    const runPromise = executeCronJob(job, ctx);
+    expect(runControl.requestCancel(job.id)).toBe(true);
+    await runPromise;
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(job.running).toBe(false);
+    expect(runControl.has(job.id)).toBe(false);
+    expect(ctx.log?.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, cronId: job.cronId }),
+      'cron:exec canceled',
+    );
   });
 });
 

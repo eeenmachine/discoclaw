@@ -1,5 +1,5 @@
 import type { Client } from 'discord.js';
-import type { RuntimeAdapter, ImageData } from '../runtime/types.js';
+import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
@@ -7,6 +7,7 @@ import type { ActionCategoryFlags } from '../discord/actions.js';
 import type { BeadContext } from '../discord/actions-beads.js';
 import type { CronContext } from '../discord/actions-crons.js';
 import type { CronRunStats } from './run-stats.js';
+import type { CronRunControl } from './run-control.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
@@ -33,6 +34,7 @@ export type CronExecutorContext = {
   cronCtx?: CronContext;
   statsStore?: CronRunStats;
   lockDir?: string;
+  runControl?: CronRunControl;
 };
 
 async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string): Promise<void> {
@@ -47,6 +49,15 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
 
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
   const metrics = globalMetrics;
+  let cancelRequested = false;
+  const cancelReason = 'Run canceled by cron control action';
+  let runtimeIterator: AsyncIterator<EngineEvent> | undefined;
+  const requestCancel = () => {
+    cancelRequested = true;
+    if (runtimeIterator?.return) {
+      void runtimeIterator.return();
+    }
+  };
 
   // Overlap guard: skip if previous run is still going (in-memory, no lock touched).
   if (job.running) {
@@ -68,6 +79,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   }
 
   job.running = true;
+  ctx.runControl?.register(job.id, requestCancel);
 
   try {
     // Resolve the target channel from the job's owning guild.
@@ -153,37 +165,59 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     let deltaText = '';
     const collectedImages: ImageData[] = [];
     const t0 = Date.now();
-    for await (const evt of ctx.runtime.invoke({
-      prompt,
-      model: effectiveModel,
-      cwd: ctx.cwd,
-      addDirs: [ctx.cwd],
-      timeoutMs: ctx.timeoutMs,
-      tools: effectiveTools,
-    })) {
-      if (evt.type === 'text_final') {
-        finalText = evt.text;
-      } else if (evt.type === 'text_delta') {
-        deltaText += evt.text;
-      } else if (evt.type === 'image_data') {
-        collectedImages.push(evt.image);
-      } else if (evt.type === 'error') {
-        metrics.recordInvokeResult('cron', Date.now() - t0, false, evt.message);
-        metrics.increment('cron.run.error');
-        ctx.log?.error({ jobId: job.id, error: evt.message }, 'cron:exec runtime error');
-        ctx.log?.warn({ flow: 'cron', jobId: job.id, error: evt.message }, 'obs.invoke.error');
-        await ctx.status?.runtimeError(
-          { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
-          `Cron "${job.name}": ${evt.message}`,
-        );
-        try {
-          await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(evt.message));
-        } catch {
-          // Best-effort user-facing signal; status channel/log already carry details.
-        }
-        await recordError(ctx, job, evt.message);
-        return;
+    try {
+      runtimeIterator = ctx.runtime.invoke({
+        prompt,
+        model: effectiveModel,
+        cwd: ctx.cwd,
+        addDirs: [ctx.cwd],
+        timeoutMs: ctx.timeoutMs,
+        tools: effectiveTools,
+      })[Symbol.asyncIterator]();
+      if (cancelRequested && runtimeIterator.return) {
+        await runtimeIterator.return();
       }
+      while (true) {
+        const next = await runtimeIterator.next();
+        if (next.done) break;
+        const evt = next.value;
+        if (cancelRequested) break;
+
+        if (evt.type === 'text_final') {
+          finalText = evt.text;
+        } else if (evt.type === 'text_delta') {
+          deltaText += evt.text;
+        } else if (evt.type === 'image_data') {
+          collectedImages.push(evt.image);
+        } else if (evt.type === 'error') {
+          metrics.recordInvokeResult('cron', Date.now() - t0, false, evt.message);
+          metrics.increment('cron.run.error');
+          ctx.log?.error({ jobId: job.id, error: evt.message }, 'cron:exec runtime error');
+          ctx.log?.warn({ flow: 'cron', jobId: job.id, error: evt.message }, 'obs.invoke.error');
+          await ctx.status?.runtimeError(
+            { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
+            `Cron "${job.name}": ${evt.message}`,
+          );
+          try {
+            await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(evt.message));
+          } catch {
+            // Best-effort user-facing signal; status channel/log already carry details.
+          }
+          await recordError(ctx, job, evt.message);
+          return;
+        }
+      }
+    } catch (err) {
+      if (!cancelRequested) throw err;
+    }
+    if (cancelRequested) {
+      if (runtimeIterator?.return) {
+        await runtimeIterator.return();
+      }
+      metrics.increment('cron.run.canceled');
+      ctx.log?.warn({ jobId: job.id, cronId: job.cronId }, 'cron:exec canceled');
+      await recordError(ctx, job, cancelReason);
+      return;
     }
     metrics.recordInvokeResult('cron', Date.now() - t0, true);
     ctx.log?.info({ flow: 'cron', jobId: job.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
@@ -268,6 +302,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         ctx.log?.warn({ err, jobId: job.id, cronId: job.cronId }, 'cron:exec lock release failed');
       });
     }
+    ctx.runControl?.clear(job.id, requestCancel);
     job.running = false;
 
     // Update bot-owned status message.

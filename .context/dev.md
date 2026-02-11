@@ -29,7 +29,7 @@ pnpm migrate:weston-content -- --overwrite
 
 ## Environment
 
-Copy `.env.example` -> `.env`. See that file for inline comments.
+Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for essentials only. For all ~90 options, use `.env.example.full`. See those files for inline comments.
 
 ### Discord
 | Variable | Default | Description |
@@ -90,7 +90,7 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `RUNTIME_MAX_BUDGET_USD` | *(unset)* | Max USD per CLI process; one-shot = per invocation, multi-turn = per session lifetime |
 | `CLAUDE_APPEND_SYSTEM_PROMPT` | *(unset)* | Append to system prompt (max 4000 chars); skips workspace PA file reads when set |
 | `DISCOCLAW_CRON_ENABLED` | `1` | Master switch for the cron subsystem (forum-based scheduled tasks) |
-| `DISCOCLAW_CRON_FORUM` | *(empty)* | Forum channel name or ID for cron definitions |
+| `DISCOCLAW_CRON_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for cron definitions |
 | `DISCOCLAW_CRON_MODEL` | `haiku` | Model used to parse natural-language cron definitions |
 
 ### Browser Automation
@@ -104,7 +104,7 @@ Copy `.env.example` -> `.env`. See that file for inline comments.
 | `DISCOCLAW_BEADS_ENABLED` | `1` | Master switch — loads beads module |
 | `BD_BIN` | `bd` | Path to the `bd` CLI binary |
 | `DISCOCLAW_BEADS_CWD` | `WORKSPACE_CWD` | Working directory for bd CLI |
-| `DISCOCLAW_BEADS_FORUM` | *(empty)* | Forum channel name or ID for bead threads |
+| `DISCOCLAW_BEADS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for bead threads |
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Path to tag-map.json |
 | `DISCOCLAW_BEADS_MENTION_USER` | *(empty)* | User ID to @mention in new bead threads |
 | `DISCOCLAW_BEADS_SIDEBAR` | `0` | When `1` + `MENTION_USER` set, persists @mention in open bead starters for sidebar visibility |

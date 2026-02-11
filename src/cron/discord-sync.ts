@@ -55,8 +55,8 @@ export function buildCronThreadName(name: string, cadence: CadenceTag | null): s
 // Status message formatting
 // ---------------------------------------------------------------------------
 
-// Running indicator is per-process in-memory state; not cross-process,
-// clears on restart, and `cronTrigger --force` can make it inaccurate.
+// Running indicator is per-process in-memory state and not cross-process;
+// it clears on restart and may be stale after crashes/restarts.
 export function formatStatusMessage(cronId: string, record: CronRunRecord, running?: boolean): string {
   const lines: string[] = [];
   lines.push(`\uD83D\uDCCA **Cron Status** [cronId:${cronId}]`);

@@ -86,7 +86,7 @@ See `dev.md` §Beads for the full env var table. Key vars:
 | `DISCOCLAW_BEADS_ENABLED` | `1` | Master switch |
 | `BD_BIN` | `bd` | Path to bd binary |
 | `DISCOCLAW_BEADS_CWD` | `WORKSPACE_CWD` | bd working directory |
-| `DISCOCLAW_BEADS_FORUM` | *(empty)* | Forum channel for threads |
+| `DISCOCLAW_BEADS_FORUM` | **(required when enabled)** | Forum channel ID (snowflake) for threads |
 | `DISCOCLAW_BEADS_AUTO_TAG` | `1` | AI tagging on create |
 | `DISCOCLAW_BEADS_TAG_MAP` | `scripts/beads/bead-hooks/tag-map.json` | Tag-to-forum-tag ID map |
 
