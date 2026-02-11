@@ -1,0 +1,114 @@
+import { ChannelType, type Client } from 'discord.js';
+import type { LoggerLike } from './action-types.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Strip a trailing ` (N)` count suffix from a forum channel name. */
+export function stripCountSuffix(name: string): string {
+  return name.replace(/\s*\(\d+\)$/, '');
+}
+
+// ---------------------------------------------------------------------------
+// ForumCountSync
+// ---------------------------------------------------------------------------
+
+const DEBOUNCE_MS = 10_000;       // 10s debounce after last requestUpdate()
+const MIN_INTERVAL_MS = 5 * 60_000; // 5min minimum between actual setName() calls
+
+/**
+ * Keeps a forum channel name in sync with a dynamic item count.
+ * Aggressively debounces to stay within Discord's 2-per-10-min channel rename limit.
+ */
+export class ForumCountSync {
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private deferredTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastUpdateMs = 0;
+  private stopped = false;
+
+  constructor(
+    private readonly client: Client,
+    private readonly forumId: string,
+    private readonly countFn: () => number | Promise<number>,
+    private readonly log?: LoggerLike,
+  ) {}
+
+  /** Schedule a count update (debounced). */
+  requestUpdate(): void {
+    if (this.stopped) return;
+    if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      void this.execute();
+    }, DEBOUNCE_MS);
+  }
+
+  /** Cancel all pending timers. */
+  stop(): void {
+    this.stopped = true;
+    if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
+    if (this.deferredTimer) { clearTimeout(this.deferredTimer); this.deferredTimer = null; }
+  }
+
+  private async execute(): Promise<void> {
+    if (this.stopped) return;
+
+    // Rate-limit: if last setName() was too recent, defer.
+    const now = Date.now();
+    const elapsed = now - this.lastUpdateMs;
+    if (elapsed < MIN_INTERVAL_MS && this.lastUpdateMs > 0) {
+      const remaining = MIN_INTERVAL_MS - elapsed;
+      this.log?.info({ forumId: this.forumId, deferMs: remaining }, 'forum-count-sync: deferred (rate limit)');
+      if (this.deferredTimer) clearTimeout(this.deferredTimer);
+      this.deferredTimer = setTimeout(() => {
+        this.deferredTimer = null;
+        void this.execute();
+      }, remaining);
+      return;
+    }
+
+    let count: number;
+    try {
+      count = await this.countFn();
+    } catch (err) {
+      this.log?.warn({ err, forumId: this.forumId }, 'forum-count-sync: countFn failed');
+      return;
+    }
+
+    const channel = this.client.channels.cache.get(this.forumId);
+    if (!channel || channel.type !== ChannelType.GuildForum) {
+      this.log?.warn({ forumId: this.forumId }, 'forum-count-sync: forum channel not found or not a forum');
+      return;
+    }
+
+    const currentName = channel.name;
+    const baseName = stripCountSuffix(currentName);
+    const newName = `${baseName} (${count})`;
+
+    if (newName === currentName) {
+      this.log?.info({ forumId: this.forumId, name: currentName }, 'forum-count-sync: name unchanged, skipping');
+      return;
+    }
+
+    try {
+      await channel.setName(newName);
+      this.lastUpdateMs = Date.now();
+      this.log?.info({ forumId: this.forumId, name: newName }, 'forum-count-sync: updated');
+    } catch (err: any) {
+      // Handle Discord 429 rate limit.
+      const retryAfter = err?.retryAfter ?? err?.retry_after;
+      if (retryAfter && typeof retryAfter === 'number') {
+        const retryMs = retryAfter * 1000;
+        this.log?.warn({ forumId: this.forumId, retryAfter }, 'forum-count-sync: rate limited, rescheduling');
+        if (this.deferredTimer) clearTimeout(this.deferredTimer);
+        this.deferredTimer = setTimeout(() => {
+          this.deferredTimer = null;
+          void this.execute();
+        }, retryMs);
+        return;
+      }
+      this.log?.warn({ err, forumId: this.forumId }, 'forum-count-sync: setName failed');
+    }
+  }
+}

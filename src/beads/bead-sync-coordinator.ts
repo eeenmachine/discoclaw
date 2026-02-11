@@ -2,6 +2,7 @@ import type { Client, Guild } from 'discord.js';
 import type { TagMap, BeadSyncResult } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
+import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import { runBeadSync } from './bead-sync.js';
 import { beadThreadCache } from './bead-thread-cache.js';
 
@@ -13,6 +14,7 @@ export type CoordinatorOptions = {
   beadsCwd: string;
   log?: LoggerLike;
   mentionUserId?: string;
+  forumCountSync?: ForumCountSync;
 };
 
 /**
@@ -43,6 +45,7 @@ export class BeadSyncCoordinator {
     try {
       const result = await runBeadSync({ ...this.opts, statusPoster });
       beadThreadCache.invalidate();
+      this.opts.forumCountSync?.requestUpdate();
       return result;
     } finally {
       this.syncing = false;

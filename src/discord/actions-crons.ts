@@ -10,6 +10,7 @@ import type { CronExecutorContext } from '../cron/executor.js';
 import { CADENCE_TAGS, generateCronId } from '../cron/run-stats.js';
 import { safeCronId } from '../cron/job-lock.js';
 import { detectCadence } from '../cron/cadence.js';
+import type { ForumCountSync } from './forum-count-sync.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
 import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from '../cron/discord-sync.js';
 import { loadTagMap } from '../beads/discord-sync.js';
@@ -60,6 +61,7 @@ export type CronContext = {
   // Thread IDs currently being created by cronCreate. The threadCreate listener
   // checks this to avoid double-handling before scheduler.register() completes.
   pendingThreadIds: Set<string>;
+  forumCountSync?: ForumCountSync;
 };
 
 // ---------------------------------------------------------------------------
@@ -177,6 +179,7 @@ export async function executeCronAction(
         await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, { log: cronCtx.log });
       } catch {}
 
+      cronCtx.forumCountSync?.requestUpdate();
       return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}` };
     }
 
@@ -402,6 +405,7 @@ export async function executeCronAction(
 
       cronCtx.scheduler.unregister(record.threadId);
       await cronCtx.statsStore.removeRecord(action.cronId);
+      cronCtx.forumCountSync?.requestUpdate();
 
       // Archive the thread.
       const thread = cronCtx.client.channels.cache.get(record.threadId);
@@ -492,6 +496,7 @@ export async function executeCronAction(
           cwd: cronCtx.cwd,
           log: cronCtx.log,
         });
+        cronCtx.forumCountSync?.requestUpdate();
         return {
           ok: true,
           summary: `Cron sync complete: ${result.tagsApplied} tags, ${result.namesUpdated} names, ${result.statusMessagesUpdated} status msgs, ${result.orphansDetected} orphans`,

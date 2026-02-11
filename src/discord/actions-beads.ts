@@ -5,6 +5,7 @@ import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TagMap, BeadData, BeadStatus, BeadSyncResult } from '../beads/types.js';
 import type { BeadSyncCoordinator } from '../beads/bead-sync-coordinator.js';
+import type { ForumCountSync } from './forum-count-sync.js';
 import { isBeadStatus } from '../beads/types.js';
 import { bdShow, bdList, bdCreate, bdUpdate, bdClose, bdAddLabel } from '../beads/bd-cli.js';
 import {
@@ -53,6 +54,7 @@ export type BeadContext = {
   statusPoster?: StatusPoster;
   log?: LoggerLike;
   syncCoordinator?: BeadSyncCoordinator;
+  forumCountSync?: ForumCountSync;
 };
 
 // ---------------------------------------------------------------------------
@@ -134,6 +136,7 @@ export async function executeBeadAction(
       }
 
       beadThreadCache.invalidate();
+      beadCtx.forumCountSync?.requestUpdate();
       const threadNote = threadId ? ` (thread created)` : '';
       return { ok: true, summary: `Bead ${bead.id} created: "${bead.title}"${threadNote}` };
     }
@@ -182,6 +185,7 @@ export async function executeBeadAction(
       }
 
       beadThreadCache.invalidate();
+      if (action.status) beadCtx.forumCountSync?.requestUpdate();
       const changes: string[] = [];
       if (action.title) changes.push(`title → "${action.title}"`);
       if (action.status) changes.push(`status → ${action.status}`);
@@ -214,6 +218,7 @@ export async function executeBeadAction(
       }
 
       beadThreadCache.invalidate();
+      beadCtx.forumCountSync?.requestUpdate();
       return { ok: true, summary: `Bead ${action.beadId} closed${action.reason ? `: ${action.reason}` : ''}` };
     }
 
@@ -281,6 +286,7 @@ export async function executeBeadAction(
             mentionUserId: beadCtx.sidebarMentionUserId,
           });
           beadThreadCache.invalidate();
+          beadCtx.forumCountSync?.requestUpdate();
         }
         return {
           ok: true,

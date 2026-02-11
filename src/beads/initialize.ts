@@ -3,6 +3,7 @@ import type { BeadContext } from '../discord/actions-beads.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
+import type { ForumCountSync } from '../discord/forum-count-sync.js';
 import { loadTagMap } from './discord-sync.js';
 import { checkBdAvailable } from './bd-cli.js';
 import { initBeadsForumGuard } from './forum-guard.js';
@@ -99,6 +100,7 @@ export type WireBeadsSyncOpts = {
   beadsCwd: string;
   sidebarMentionUserId?: string;
   log: LoggerLike;
+  forumCountSync?: ForumCountSync;
 };
 
 export type WireBeadsSyncResult = {
@@ -119,6 +121,7 @@ export async function wireBeadsSync(opts: WireBeadsSyncOpts): Promise<WireBeadsS
     beadsCwd: opts.beadsCwd,
     log: opts.log,
     mentionUserId: opts.sidebarMentionUserId,
+    forumCountSync: opts.forumCountSync,
   });
   opts.beadCtx.syncCoordinator = syncCoordinator;
 

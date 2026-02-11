@@ -18,8 +18,11 @@ import type { ActionCategoryFlags } from './discord/actions.js';
 import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
 import { initializeBeadsContext, wireBeadsSync } from './beads/initialize.js';
-import { checkBdAvailable } from './beads/bd-cli.js';
+import { checkBdAvailable, bdList } from './beads/bd-cli.js';
+import { ForumCountSync } from './discord/forum-count-sync.js';
+import { resolveBeadsForum } from './beads/discord-sync.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
+import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { ensureForumTags } from './discord/system-bootstrap.js';
@@ -72,10 +75,14 @@ try {
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
 let beadSyncWatcher: { stop(): void } | null = null;
+let beadForumCountSync: ForumCountSync | undefined;
+let cronForumCountSync: ForumCountSync | undefined;
 const shutdown = async () => {
   // Kill Claude subprocesses first so they release session locks before the new instance starts.
   killActiveSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
+  beadForumCountSync?.stop();
+  cronForumCountSync?.stop();
   beadSyncWatcher?.stop();
   cronScheduler?.stopAll();
   await botStatus?.offline();
@@ -165,6 +172,23 @@ const useGroupDirCwd = cfg.useGroupDirCwd;
 
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
+
+// --- Probe workspace permissions (startup visibility) ---
+const permProbe = await probeWorkspacePermissions(workspaceCwd);
+if (permProbe.status === 'missing') {
+  log.warn(
+    { workspaceCwd },
+    'PERMISSIONS.json not found — using env/default tools (this may grant full access). ' +
+    'Run onboarding or manually create workspace/PERMISSIONS.json.',
+  );
+} else if (permProbe.status === 'invalid') {
+  log.warn(
+    { workspaceCwd, reason: permProbe.reason },
+    'PERMISSIONS.json is invalid — falling back to env/default tools.',
+  );
+} else {
+  log.info({ workspaceCwd, tier: permProbe.permissions.tier }, 'workspace permissions loaded');
+}
 
 // --- Resolve bot display name ---
 const botDisplayName = await resolveDisplayName({
@@ -388,6 +412,21 @@ if (beadCtx) {
   const resolvedGuildId = guildId || system?.guildId || '';
   const guild = resolvedGuildId ? client.guilds.cache.get(resolvedGuildId) : undefined;
   if (guild) {
+    // Create forum count sync for beads.
+    const beadForum = await resolveBeadsForum(guild, beadCtx.forumId);
+    if (beadForum) {
+      beadForumCountSync = new ForumCountSync(
+        client,
+        beadForum.id,
+        async () => {
+          const all = await bdList({ status: 'all' }, beadsCwd);
+          return all.filter(b => b.status !== 'closed' && b.status !== 'done' && b.status !== 'tombstone').length;
+        },
+        log,
+      );
+      beadCtx.forumCountSync = beadForumCountSync;
+    }
+
     const wired = await wireBeadsSync({
       beadCtx,
       client,
@@ -396,6 +435,7 @@ if (beadCtx) {
       beadsCwd,
       sidebarMentionUserId,
       log,
+      forumCountSync: beadForumCountSync,
     });
     beadSyncWatcher = wired.syncWatcher;
   } else {
@@ -474,8 +514,9 @@ if (cronEnabled && effectiveCronForum) {
   botParams.cronCtx = cronCtx;
   botParams.discordActionsCrons = discordActionsCrons && cronEnabled;
 
+  let cronForumResult: { forumId: string } = { forumId: '' };
   try {
-    await initCronForum({
+    cronForumResult = await initCronForum({
       client,
       forumChannelNameOrId: effectiveCronForum,
       scheduler: cronScheduler,
@@ -486,9 +527,22 @@ if (cronEnabled && effectiveCronForum) {
       log,
       statsStore: cronStats,
       pendingThreadIds: cronPendingThreadIds,
+      onCountChanged: () => cronForumCountSync?.requestUpdate(),
     });
   } catch (err) {
     log.error({ err }, 'cron:forum init failed');
+  }
+
+  // Create forum count sync for crons (after initCronForum so all jobs are loaded).
+  if (cronForumResult.forumId) {
+    cronForumCountSync = new ForumCountSync(
+      client,
+      cronForumResult.forumId,
+      () => cronScheduler!.listJobs().length,
+      log,
+    );
+    cronCtx.forumCountSync = cronForumCountSync;
+    cronForumCountSync.requestUpdate();
   }
 
   // Bootstrap forum tags from the tag map (creates missing tags on the Discord forum).

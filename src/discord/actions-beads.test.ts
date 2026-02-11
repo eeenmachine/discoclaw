@@ -146,6 +146,16 @@ describe('executeBeadAction', () => {
     expect((result as any).summary).toContain('New task');
   });
 
+  it('beadCreate calls forumCountSync.requestUpdate', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    await executeBeadAction(
+      { type: 'beadCreate', title: 'Counted task' },
+      makeCtx(),
+      makeBeadCtx({ forumCountSync: mockSync as any }),
+    );
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
   it('beadCreate fails without title', async () => {
     const result = await executeBeadAction(
       { type: 'beadCreate', title: '' },
@@ -177,6 +187,26 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('ws-001');
     expect((result as any).summary).toContain('in_progress');
+  });
+
+  it('beadUpdate calls forumCountSync.requestUpdate when status changed', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress' },
+      makeCtx(),
+      makeBeadCtx({ forumCountSync: mockSync as any }),
+    );
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
+  it('beadUpdate does NOT call forumCountSync.requestUpdate without status change', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', title: 'New title' },
+      makeCtx(),
+      makeBeadCtx({ forumCountSync: mockSync as any }),
+    );
+    expect(mockSync.requestUpdate).not.toHaveBeenCalled();
   });
 
   it('beadUpdate fails without beadId', async () => {
@@ -253,6 +283,16 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('ws-001');
     expect((result as any).summary).toContain('Done');
+  });
+
+  it('beadClose calls forumCountSync.requestUpdate', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    await executeBeadAction(
+      { type: 'beadClose', beadId: 'ws-001' },
+      makeCtx(),
+      makeBeadCtx({ forumCountSync: mockSync as any }),
+    );
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
   });
 
   it('beadShow returns bead details', async () => {

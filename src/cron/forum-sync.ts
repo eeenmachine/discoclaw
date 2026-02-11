@@ -25,6 +25,7 @@ export type ForumSyncOptions = {
   // Thread IDs currently being created by cronCreate action. Checked by the
   // threadCreate listener to avoid double-handling before register() completes.
   pendingThreadIds?: Set<string>;
+  onCountChanged?: () => void;
 };
 
 function resolveForumChannel(client: Client, nameOrId: string): ForumChannel | null {
@@ -299,7 +300,8 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate');
       // Small delay: Discord may not have the starter message ready immediately after thread creation.
       await new Promise((r) => setTimeout(r, 2000));
-      await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: true, allowUserIds, statsStore });
+      const ok = await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: true, allowUserIds, statsStore });
+      if (ok) opts.onCountChanged?.();
     } catch (err) {
       log?.error({ err, threadId: thread.id }, 'cron:forum threadCreate handler failed');
     }
@@ -310,6 +312,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       if (thread.parentId !== forumId) return;
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadDelete');
       scheduler.unregister(thread.id);
+      opts.onCountChanged?.();
       // Clean up stats.
       if (statsStore) {
         void statsStore.removeByThreadId(thread.id).catch(() => {});

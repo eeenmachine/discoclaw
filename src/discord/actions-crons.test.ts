@@ -256,6 +256,38 @@ describe('executeCronAction', () => {
     }
   });
 
+  it('cronCreate calls forumCountSync.requestUpdate', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    const cronCtx = makeCronCtx({ forumCountSync: mockSync as any });
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'New Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
+  it('cronDelete calls forumCountSync.requestUpdate', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    const cronCtx = makeCronCtx({ forumCountSync: mockSync as any });
+    const result = await executeCronAction(
+      { type: 'cronDelete', cronId: 'cron-test0001' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
+  it('cronSync calls forumCountSync.requestUpdate', async () => {
+    const mockSync = { requestUpdate: vi.fn(), stop: vi.fn() };
+    const cronCtx = makeCronCtx({ forumCountSync: mockSync as any });
+    const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    expect(mockSync.requestUpdate).toHaveBeenCalled();
+  });
+
   it('cronCreate validates required fields', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction({ type: 'cronCreate', name: '', schedule: '', channel: '', prompt: '' } as any, makeActionCtx(), cronCtx);
