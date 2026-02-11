@@ -19,6 +19,7 @@ import type { BeadContext } from './discord/actions-beads.js';
 import type { CronContext } from './discord/actions-crons.js';
 import { loadTagMap } from './beads/discord-sync.js';
 import { checkBdAvailable } from './beads/bd-cli.js';
+import { initBeadsForumGuard } from './beads/forum-guard.js';
 import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
@@ -355,6 +356,7 @@ if (beadsEnabled) {
       };
       botParams.beadCtx = beadCtx;
       botParams.discordActionsBeads = discordActionsBeads && beadsEnabled;
+      initBeadsForumGuard({ client, forumId: effectiveForum, log });
       log.info(
         { beadsCwd, beadsForum: effectiveForum, tagCount: Object.keys(tagMap).length, autoTag: beadsAutoTag, bdVersion },
         'beads:initialized',

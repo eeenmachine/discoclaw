@@ -120,6 +120,15 @@ async function ensureChild(
   const exact = findByNameAndType(guild, spec.name, spec.type);
   if (exact) {
     const moved = await moveUnderCategory(exact, parentCategoryId, log);
+    // Reconcile topic if it differs from expected.
+    if (spec.topic && (exact as any).topic !== spec.topic) {
+      try {
+        await (exact as any).edit({ topic: spec.topic });
+        log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
+      } catch (err) {
+        log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
+      }
+    }
     return { id: String((exact as any).id ?? ''), created: false, moved };
   }
 
@@ -170,7 +179,7 @@ export async function ensureSystemScaffold(
   const crons = await ensureChild(
     guild,
     system.id,
-    { name: 'crons', type: ChannelType.GuildForum, topic: 'Cron jobs (one thread per job).' },
+    { name: 'crons', type: ChannelType.GuildForum, topic: 'Cron jobs are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.' },
     log,
   );
   if (crons.created) created.push('crons');
@@ -181,7 +190,7 @@ export async function ensureSystemScaffold(
     beads = await ensureChild(
       guild,
       system.id,
-      { name: 'beads', type: ChannelType.GuildForum, topic: 'Beads (one thread per bead).' },
+      { name: 'beads', type: ChannelType.GuildForum, topic: 'Beads are managed by the bot. Use bead commands or the bd CLI to create tasks. Do not create threads manually — they will be archived.' },
       log,
     );
     if (beads.created) created.push('beads');

@@ -54,6 +54,28 @@ async function fetchStarterMessage(thread: AnyThreadChannel): Promise<Message | 
   }
 }
 
+function isBotOwned(thread: AnyThreadChannel): boolean {
+  const botUserId = thread.client?.user?.id ?? '';
+  return botUserId !== '' && thread.ownerId === botUserId;
+}
+
+async function rejectManualThread(
+  thread: AnyThreadChannel,
+  log?: LoggerLike,
+): Promise<void> {
+  log?.info({ threadId: thread.id, name: thread.name, ownerId: thread.ownerId }, 'cron:forum rejected manual thread');
+  try {
+    await thread.send(
+      'Cron jobs must be created using the `cronCreate` bot command, not by manually creating forum threads.\n\n'
+      + 'Ask the bot to create a cron job for you, and it will set up this forum thread automatically.\n\n'
+      + 'This thread will be archived.',
+    );
+  } catch { /* ignore */ }
+  try {
+    await thread.setArchived(true);
+  } catch { /* ignore */ }
+}
+
 function scheduleEmbed(name: string, def: ParsedCronDef, nextRun: Date | null): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x57f287)
@@ -268,6 +290,12 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
         return;
       }
 
+      // Reject manually-created threads (not created by the bot).
+      if (!isBotOwned(thread)) {
+        await rejectManualThread(thread, log);
+        return;
+      }
+
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadCreate');
       // Small delay: Discord may not have the starter message ready immediately after thread creation.
       await new Promise((r) => setTimeout(r, 2000));
@@ -308,6 +336,11 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
             }
           }
         } else {
+          // Reject unarchived manual threads not already grandfathered into the scheduler.
+          if (!scheduler.getJob(newThread.id) && !isBotOwned(newThread)) {
+            await rejectManualThread(newThread, log);
+            return;
+          }
           log?.info({ threadId: newThread.id }, 'cron:forum thread unarchived, re-loading');
           await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds, statsStore });
         }
@@ -316,6 +349,11 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
 
       // Name changed — update the job name (re-parse for good measure).
       if (oldThread.name !== newThread.name) {
+        // Reject manual threads not already in the scheduler.
+        if (!scheduler.getJob(newThread.id) && !isBotOwned(newThread)) {
+          await rejectManualThread(newThread, log);
+          return;
+        }
         log?.info({ threadId: newThread.id, oldName: oldThread.name, newName: newThread.name }, 'cron:forum thread name changed');
         await loadThreadAsCron(newThread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds, statsStore });
       }

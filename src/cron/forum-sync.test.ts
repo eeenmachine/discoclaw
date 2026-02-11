@@ -35,8 +35,10 @@ function makeThread(overrides?: Partial<any>) {
     name: 'Job 1',
     archived: false,
     parentId: 'forum-1',
+    ownerId: 'bot-user-1',
     fetchStarterMessage: vi.fn(),
     send: vi.fn().mockResolvedValue(undefined),
+    setArchived: vi.fn().mockResolvedValue(undefined),
     messages: { fetch: vi.fn().mockResolvedValue(new Map()) },
     client: { user: { id: 'bot-user-1' } },
     ...overrides,
@@ -437,5 +439,140 @@ describe('threadCreate listener', () => {
     await listener(thread);
 
     expect(scheduler.register).toHaveBeenCalled();
+  });
+
+  it('rejects manually-created threads with guidance message and archives', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    const thread = makeThread({ id: 'thread-manual', parentId: 'forum-1', ownerId: 'some-user' });
+    await listener(thread);
+
+    expect(thread.send).toHaveBeenCalledWith(expect.stringContaining('cronCreate'));
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+    expect(thread.fetchStarterMessage).not.toHaveBeenCalled();
+  });
+
+  it('allows bot-created threads through to loadThreadAsCron', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+
+    const thread = makeThread({ id: 'thread-bot', parentId: 'forum-1', ownerId: 'bot-user-1' });
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am say hello',
+      author: { id: 'bot-user-1' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    await listener(thread);
+
+    expect(thread.fetchStarterMessage).toHaveBeenCalled();
+  });
+
+  it('handles send failure gracefully during rejection', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    const thread = makeThread({ id: 'thread-manual-2', parentId: 'forum-1', ownerId: 'some-user' });
+    thread.send.mockRejectedValue(new Error('Missing Access'));
+    await listener(thread);
+
+    expect(thread.setArchived).toHaveBeenCalledWith(true);
+  });
+});
+
+describe('threadUpdate listener', () => {
+  let initCronForum: typeof import('./forum-sync.js').initCronForum;
+  let parseCronDefinition: typeof import('./parser.js').parseCronDefinition;
+
+  beforeEach(async () => {
+    ({ initCronForum } = await import('./forum-sync.js'));
+    ({ parseCronDefinition } = await import('./parser.js'));
+    vi.mocked(parseCronDefinition).mockReset();
+  });
+
+  async function setupAndGetListener(opts: { scheduler?: any } = {}) {
+    const forum = makeForum([]);
+    const client = makeClient(forum);
+    const scheduler = opts.scheduler ?? makeScheduler();
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    const threadUpdateCallbacks = client._listeners['threadUpdate'] ?? [];
+    expect(threadUpdateCallbacks.length).toBeGreaterThan(0);
+    return { listener: threadUpdateCallbacks[0], scheduler, client };
+  }
+
+  it('rejects unarchived manual thread not in scheduler', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    const oldThread = makeThread({ id: 'thread-manual', parentId: 'forum-1', ownerId: 'some-user', archived: true });
+    const newThread = makeThread({ id: 'thread-manual', parentId: 'forum-1', ownerId: 'some-user', archived: false });
+    await listener(oldThread, newThread);
+
+    expect(newThread.send).toHaveBeenCalledWith(expect.stringContaining('cronCreate'));
+    expect(newThread.setArchived).toHaveBeenCalledWith(true);
+  });
+
+  it('allows unarchived grandfathered thread through', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue({ id: 'thread-grandfathered' });
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+
+    const oldThread = makeThread({ id: 'thread-grandfathered', parentId: 'forum-1', ownerId: 'some-user', archived: true });
+    const newThread = makeThread({ id: 'thread-grandfathered', parentId: 'forum-1', ownerId: 'some-user', archived: false });
+    newThread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am say hello',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+    await listener(oldThread, newThread);
+
+    // Should NOT be rejected — should proceed to loadThreadAsCron.
+    expect(newThread.setArchived).not.toHaveBeenCalledWith(true);
+  });
+
+  it('rejects manual thread on name change when not in scheduler', async () => {
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+    const { listener } = await setupAndGetListener({ scheduler });
+
+    const oldThread = makeThread({ id: 'thread-manual', parentId: 'forum-1', ownerId: 'some-user', name: 'Old Name' });
+    const newThread = makeThread({ id: 'thread-manual', parentId: 'forum-1', ownerId: 'some-user', name: 'New Name' });
+    await listener(oldThread, newThread);
+
+    expect(newThread.send).toHaveBeenCalledWith(expect.stringContaining('cronCreate'));
+    expect(newThread.setArchived).toHaveBeenCalledWith(true);
   });
 });
