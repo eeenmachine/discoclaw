@@ -205,22 +205,28 @@ describe('probeWorkspacePermissions', () => {
 });
 
 describe('resolveTools', () => {
-  const envTools = ['Bash', 'Read', 'Edit', 'WebSearch', 'WebFetch'];
+  const envTools = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
 
   it('returns env tools when permissions is null', () => {
     expect(resolveTools(null, envTools)).toBe(envTools);
   });
 
   it('returns correct tools for readonly tier', () => {
-    expect(resolveTools({ tier: 'readonly' }, envTools)).toEqual(TIER_TOOLS.readonly);
+    expect(resolveTools({ tier: 'readonly' }, envTools)).toEqual(
+      ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    );
   });
 
   it('returns correct tools for standard tier', () => {
-    expect(resolveTools({ tier: 'standard' }, envTools)).toEqual(TIER_TOOLS.standard);
+    expect(resolveTools({ tier: 'standard' }, envTools)).toEqual(
+      ['Read', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    );
   });
 
   it('returns correct tools for full tier', () => {
-    expect(resolveTools({ tier: 'full' }, envTools)).toEqual(TIER_TOOLS.full);
+    expect(resolveTools({ tier: 'full' }, envTools)).toEqual(
+      ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch'],
+    );
   });
 
   it('uses custom tools array for custom tier', () => {

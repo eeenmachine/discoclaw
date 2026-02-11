@@ -210,6 +210,70 @@ describe('parseConfig', () => {
     expect(config.beadsSidebar).toBe(true);
   });
 
+  // --- Fallback model ---
+  it('parses RUNTIME_FALLBACK_MODEL when set', () => {
+    const { config } = parseConfig(env({ RUNTIME_FALLBACK_MODEL: 'sonnet' }));
+    expect(config.runtimeFallbackModel).toBe('sonnet');
+  });
+
+  it('returns undefined for runtimeFallbackModel when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.runtimeFallbackModel).toBeUndefined();
+  });
+
+  // --- Max budget USD ---
+  it('parses RUNTIME_MAX_BUDGET_USD positive number', () => {
+    const { config } = parseConfig(env({ RUNTIME_MAX_BUDGET_USD: '5.00' }));
+    expect(config.runtimeMaxBudgetUsd).toBe(5);
+  });
+
+  it('returns undefined for runtimeMaxBudgetUsd when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.runtimeMaxBudgetUsd).toBeUndefined();
+  });
+
+  it('throws on RUNTIME_MAX_BUDGET_USD=0', () => {
+    expect(() => parseConfig(env({ RUNTIME_MAX_BUDGET_USD: '0' })))
+      .toThrow(/RUNTIME_MAX_BUDGET_USD must be a positive number/);
+  });
+
+  it('throws on RUNTIME_MAX_BUDGET_USD negative', () => {
+    expect(() => parseConfig(env({ RUNTIME_MAX_BUDGET_USD: '-1' })))
+      .toThrow(/RUNTIME_MAX_BUDGET_USD must be a positive number/);
+  });
+
+  it('throws on RUNTIME_MAX_BUDGET_USD non-numeric', () => {
+    expect(() => parseConfig(env({ RUNTIME_MAX_BUDGET_USD: 'abc' })))
+      .toThrow(/RUNTIME_MAX_BUDGET_USD must be a positive number/);
+  });
+
+  // --- Append system prompt ---
+  it('parses CLAUDE_APPEND_SYSTEM_PROMPT when set', () => {
+    const { config } = parseConfig(env({ CLAUDE_APPEND_SYSTEM_PROMPT: 'You are Weston.' }));
+    expect(config.appendSystemPrompt).toBe('You are Weston.');
+  });
+
+  it('returns undefined for appendSystemPrompt when unset', () => {
+    const { config } = parseConfig(env());
+    expect(config.appendSystemPrompt).toBeUndefined();
+  });
+
+  it('throws when CLAUDE_APPEND_SYSTEM_PROMPT exceeds 4000 chars', () => {
+    expect(() => parseConfig(env({ CLAUDE_APPEND_SYSTEM_PROMPT: 'x'.repeat(4001) })))
+      .toThrow(/CLAUDE_APPEND_SYSTEM_PROMPT exceeds 4000 char limit/);
+  });
+
+  it('accepts CLAUDE_APPEND_SYSTEM_PROMPT at exactly 4000 chars', () => {
+    const { config } = parseConfig(env({ CLAUDE_APPEND_SYSTEM_PROMPT: 'x'.repeat(4000) }));
+    expect(config.appendSystemPrompt).toHaveLength(4000);
+  });
+
+  // --- Default tools include Glob, Grep, Write ---
+  it('default RUNTIME_TOOLS includes Glob, Grep, Write', () => {
+    const { config } = parseConfig(env());
+    expect(config.runtimeTools).toEqual(['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch']);
+  });
+
   // --- Reaction remove handler ---
   it('defaults reactionRemoveHandlerEnabled to false', () => {
     const { config } = parseConfig(env());
