@@ -45,13 +45,10 @@ Participate, don't dominate.
 ## Memory
 
 Memory is layered. Use the right layer for the right thing.
+See `.context/memory.md` for full architecture, examples, and config reference.
 
-- **Durable memory** — structured facts stored via `!memory` commands, injected into every prompt. Good for quick facts, preferences, names, dates.
-- **Rolling summaries** — conversation history compressed and carried forward between sessions. Automatic.
-- **`MEMORY.md`** — your curated long-term notes (loaded in DMs only). Decisions, lessons, project context, nuanced preferences. Keep it pruned.
-- **`memory/YYYY-MM-DD.md`** — daily scratch logs (loaded in DMs, today + yesterday only). Raw session notes, follow-ups, in-progress thinking.
-
-When someone says "remember this": if it's a quick fact, use `!memory add <note>`. If it's nuanced or needs context, write it to `MEMORY.md` or today's daily log.
+Quick rule: if someone says "remember this" — quick fact → `!memory remember <note>`.
+Nuanced/contextual → write to `MEMORY.md` or today's daily log.
 
 ## External vs Internal Actions
 

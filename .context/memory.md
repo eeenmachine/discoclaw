@@ -1,0 +1,196 @@
+# Memory System
+
+Five runtime layers plus workspace files, wired together through prompt assembly.
+
+## Layers
+
+### 1. Rolling Summaries — conversation continuity
+
+`src/discord/summarizer.ts`
+
+Compresses conversation history into a running summary using Haiku. Updated every
+N turns (default 5). Keyed per session (user+channel pair). Automatic and invisible.
+
+**What the user sees:**
+- Nothing directly — the bot just "remembers" what you were discussing.
+- After a gap, the bot still knows you were debugging a CI pipeline or planning a trip.
+- `!memory show` reveals the current summary if you're curious.
+- `!memory reset rolling` clears it for a fresh start in a channel.
+
+**Example:**
+```
+User (turn 1):  Hey, I'm working on migrating our API from Express to Fastify
+Bot:             Nice — what version of Fastify? Any middleware you need to port?
+User (turn 6):  What were we talking about?
+Bot:             We've been working through your Express → Fastify migration.
+                 You've ported the auth middleware and are stuck on the
+                 request validation layer.
+```
+
+### 2. Durable Memory — long-term user facts
+
+`src/discord/durable-memory.ts`
+
+Structured store of user facts. Each item has a kind (fact, preference, project,
+constraint, person, tool, workflow), deduplication by content hash, and a 200-item
+cap per user. Injected into every prompt.
+
+**What the user sees:**
+- The bot knows your preferences, projects, and key facts across all conversations.
+- Works in every channel, not just the one where the fact was stored.
+- Survives restarts, deploys, and long gaps between conversations.
+
+**Example:**
+```
+User:  !memory remember I prefer Rust over Go for systems work
+Bot:   Remembered: "I prefer Rust over Go for systems work"
+
+(days later, different channel)
+User:  Should I write this CLI tool in Go or Rust?
+Bot:   Given your preference for Rust in systems work, I'd lean that way —
+       especially since this is a low-level networking tool.
+```
+
+### 3. Memory Commands — user-facing control surface
+
+`src/discord/memory-commands.ts`
+
+Manual interface for layers 1 and 2. Intercepts messages before they hit the runtime.
+
+| Command | What it does |
+|---------|-------------|
+| `!memory show` | Lists all durable items + rolling summary |
+| `!memory remember <text>` | Adds a fact to durable memory |
+| `!memory forget <substring>` | Deprecates matching durable items |
+| `!memory reset rolling` | Clears rolling summary for current session |
+
+**Example:**
+```
+User:  !memory show
+Bot:   Durable memory (3 items):
+       - [fact] Works at Acme Corp (src: manual)
+       - [preference] Prefers Rust over Go for systems work (src: manual)
+       - [project] Building a Discord bot called Discoclaw (src: summary)
+
+       Rolling summary:
+       User discussed adding webhook support to their Fastify migration...
+
+User:  !memory forget Acme
+Bot:   Deprecated 1 item matching "Acme"
+```
+
+### 4. Auto-Extraction — user turn to durable memory
+
+`src/discord/user-turn-to-durable.ts`
+
+After each bot response, fires a separate Haiku call to extract up to 3 notable
+facts from the user's message and writes them to durable memory. Off by default.
+
+**What the user sees:**
+- The bot passively picks up on things you mention without being asked.
+- No `!memory remember` needed — facts accumulate naturally.
+- Only extracts what the user explicitly stated, not inferences.
+
+**Example:**
+```
+User:  I just switched teams — I'm on the platform team now, working with
+       Kubernetes and Terraform mostly.
+Bot:   Cool, platform work! What's your first project?
+
+(behind the scenes, auto-extracted to durable memory:)
+  [fact]  On the platform team
+  [tool]  Works with Kubernetes and Terraform
+```
+
+**Config:** `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED=true` to enable.
+
+### 5. Short-Term Memory — cross-channel awareness
+
+`src/discord/shortterm-memory.ts`
+
+Records brief summaries of recent exchanges across public guild channels.
+Entries expire after 6 hours (configurable). Only logs public channels. Off by default.
+
+**What the user sees:**
+- The bot knows what you were just doing in other channels.
+- Switching from #dev to #general doesn't lose context.
+- Creates a sense of continuity across the server, not just within one channel.
+
+**Example:**
+```
+(in #dev)
+User:  Can you help me debug this failing test? It's the auth middleware one.
+Bot:   Sure — looks like the mock isn't returning the right token format...
+
+(switch to #general, 10 minutes later)
+User:  Hey, quick question about JWT expiry
+Bot:   Sure — is this related to the auth middleware test you were debugging
+       in #dev? The token format issue might be connected to expiry handling.
+```
+
+**Config:** `DISCOCLAW_SHORTTERM_MEMORY_ENABLED=true` to enable.
+
+### 6. Workspace Files — human-curated memory
+
+`workspace/MEMORY.md` + `workspace/memory/YYYY-MM-DD.md`
+
+Curated long-term notes and daily scratch logs. Loaded in DMs only. These hold
+things too nuanced for structured durable items — decisions, lessons, project
+context, relationship dynamics.
+
+**What the user sees:**
+- In DMs, the bot has deep context about ongoing projects and past decisions.
+- Daily logs capture session-level notes that auto-rotate.
+- The bot (or the user) can write to these files to preserve important context.
+
+**Example (MEMORY.md):**
+```markdown
+## Project: API Migration
+- Decided on Fastify over Hono — better ecosystem for our middleware needs
+- Auth team wants OAuth2 support by Q3, blocking the migration timeline
+- Dave prefers incremental migration (route-by-route), not big-bang
+```
+
+## Prompt Assembly
+
+Memory sections are injected into every prompt in this order:
+
+```
+Context files (PA + MEMORY.md + daily logs + channel context)
+  → Durable memory section (up to 2000 chars)
+  → Short-term memory section (up to 1000 chars)
+  → Rolling summary section
+  → Message history (sliding window)
+  → Discord actions
+  → Current message
+```
+
+Built by `src/discord/prompt-common.ts` and assembled in `src/discord.ts`.
+
+## Concurrency
+
+- **Durable write queue** (`src/discord/durable-write-queue.ts`) — shared KeyedQueue
+  serializing per-user writes across memory commands and auto-extraction.
+- **Short-term memory** has its own internal KeyedQueue instance.
+- Both use atomic writes (`.tmp.${pid}` + `rename()`) safe for single-process.
+
+## Config Reference
+
+| Variable | Default | Layer |
+|----------|---------|-------|
+| `DISCOCLAW_SUMMARY_ENABLED` | `true` | Rolling summaries |
+| `DISCOCLAW_SUMMARY_MODEL` | `haiku` | Rolling summaries |
+| `DISCOCLAW_SUMMARY_MAX_CHARS` | `2000` | Rolling summaries |
+| `DISCOCLAW_SUMMARY_EVERY_N_TURNS` | `5` | Rolling summaries |
+| `DISCOCLAW_DURABLE_MEMORY_ENABLED` | `true` | Durable memory |
+| `DISCOCLAW_DURABLE_INJECT_MAX_CHARS` | `2000` | Durable memory |
+| `DISCOCLAW_DURABLE_MAX_ITEMS` | `200` | Durable memory |
+| `DISCOCLAW_MEMORY_COMMANDS_ENABLED` | `true` | Memory commands |
+| `DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED` | `false` | Auto-extraction |
+| `DISCOCLAW_SHORTTERM_MEMORY_ENABLED` | `false` | Short-term memory |
+| `DISCOCLAW_SHORTTERM_MAX_ENTRIES` | `20` | Short-term memory |
+| `DISCOCLAW_SHORTTERM_MAX_AGE_HOURS` | `6` | Short-term memory |
+| `DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS` | `1000` | Short-term memory |
+
+Storage directories are configurable via `_DATA_DIR` / `_DIR` env vars;
+defaults are under `$DISCOCLAW_DATA_DIR/`.
