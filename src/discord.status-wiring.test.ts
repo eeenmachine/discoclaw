@@ -144,4 +144,46 @@ describe('status wiring in message handler', () => {
 
     await expect(handler(makeMsg())).resolves.toBeUndefined();
   });
+
+  it('swallows 50083 (thread archived) without calling handlerError', async () => {
+    const runtime = {
+      invoke: async function* () {
+        yield { type: 'text_final', text: 'Done' } as any;
+      },
+    } as any;
+    const status = mockStatus();
+    const statusRef: StatusRef = { current: status };
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue(), statusRef);
+
+    // Make reply.edit throw a Discord 50083 "Thread is archived" error.
+    const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50083), delete: vi.fn(async () => {}) };
+    const msg = makeMsg();
+    msg.reply = vi.fn(async () => replyObj);
+
+    await handler(msg);
+
+    expect(status.handlerError).not.toHaveBeenCalled();
+  });
+
+  it('still calls handlerError for non-50083 Discord errors', async () => {
+    const runtime = {
+      invoke: async function* () {
+        yield { type: 'text_final', text: 'Done' } as any;
+      },
+    } as any;
+    const status = mockStatus();
+    const statusRef: StatusRef = { current: status };
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue(), statusRef);
+
+    // A different Discord error (e.g. Missing Permissions = 50013).
+    const err50013 = Object.assign(new Error('Missing Permissions'), { code: 50013 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50013) };
+    const msg = makeMsg();
+    msg.reply = vi.fn(async () => replyObj);
+
+    await handler(msg);
+
+    expect(status.handlerError).toHaveBeenCalledOnce();
+  });
 });

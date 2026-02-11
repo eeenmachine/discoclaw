@@ -534,6 +534,63 @@ describe('createReactionAddHandler', () => {
     expect(invokeSpy).toHaveBeenCalledOnce();
     expect(invokeSpy.mock.calls[0][0].sessionId).toBe('ses-abc');
   });
+
+  it('swallows 50083 (thread archived) without triggering handlerError', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue, statusRef);
+
+    // Make reply.edit throw a Discord 50083 "Thread is archived" error.
+    const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50083) };
+    const msg = mockMessage();
+    msg._replyObj = replyObj;
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(statusPoster.handlerError).not.toHaveBeenCalled();
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: expect.any(String) }),
+      expect.stringContaining('reply skipped (thread archived by action)'),
+    );
+  });
+
+  it('still triggers handlerError for non-50083 Discord errors', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue, statusRef);
+
+    const err50013 = Object.assign(new Error('Missing Permissions'), { code: 50013 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50013) };
+    const msg = mockMessage();
+    msg._replyObj = replyObj;
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(statusPoster.handlerError).toHaveBeenCalledOnce();
+  });
 });
 
 describe('createReactionRemoveHandler', () => {
