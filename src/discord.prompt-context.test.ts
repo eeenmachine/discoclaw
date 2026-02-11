@@ -96,6 +96,7 @@ describe('prompt includes correct context file paths', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -167,6 +168,7 @@ describe('prompt includes correct context file paths', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -238,6 +240,7 @@ describe('prompt includes correct context file paths', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -295,6 +298,7 @@ describe('discord action flags are not frozen at handler creation', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     };
@@ -364,6 +368,7 @@ describe('durable memory injection into prompt', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -441,6 +446,7 @@ describe('workspace PA files in prompt', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -512,6 +518,7 @@ describe('workspace PA files in prompt', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -574,6 +581,7 @@ describe('workspace PA files in prompt', () => {
       memoryCommandsEnabled: false,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);
@@ -633,6 +641,7 @@ describe('memory command interception', () => {
       memoryCommandsEnabled: true,
       actionFollowupDepth: 0,
       reactionHandlerEnabled: false,
+      reactionRemoveHandlerEnabled: false,
       reactionMaxAgeMs: 86400000,
       botDisplayName: 'TestBot',
     }, queue);

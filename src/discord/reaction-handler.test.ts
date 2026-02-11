@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createReactionAddHandler } from './reaction-handler.js';
+import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
 
@@ -133,6 +133,7 @@ function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotPara
     toolAwareStreaming: false,
     actionFollowupDepth: 0,
     reactionHandlerEnabled: true,
+    reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 24 * 60 * 60 * 1000,
     ...overrides,
   };
@@ -483,5 +484,110 @@ describe('createReactionAddHandler', () => {
     expect(sessionManager.getOrCreate).toHaveBeenCalledOnce();
     expect(invokeSpy).toHaveBeenCalledOnce();
     expect(invokeSpy.mock.calls[0][0].sessionId).toBe('ses-abc');
+  });
+});
+
+describe('createReactionRemoveHandler', () => {
+  it('ignores self-reactions (bot reacting to its own)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction();
+    const user = mockUser({ id: 'bot-1' });
+    await handler(reaction as any, user as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-allowlisted users', async () => {
+    const params = makeParams({ allowUserIds: new Set(['other-user']) });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores reactions in non-allowed channels', async () => {
+    const params = makeParams({ allowChannelIds: new Set(['other-channel']) });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores DM reactions (guildId null)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ guildId: null }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale messages older than reactionMaxAgeMs', async () => {
+    const params = makeParams({ reactionMaxAgeMs: 1000 });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ createdTimestamp: Date.now() - 5000 }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('happy path — allowlisted user unreacts, runtime responds, reply posted', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(queue.run).toHaveBeenCalledOnce();
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toContain('Reaction response!');
+  });
+
+  it('prompt contains "removed their" and does NOT contain "reacted with"', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('removed their');
+    expect(prompt).not.toContain('reacted with');
+  });
+
+  it('increments discord.reaction_remove.received metric', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const params = makeParams({ metrics });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const snap = metrics.snapshot();
+    expect(snap.counters['discord.reaction_remove.received']).toBe(1);
   });
 });

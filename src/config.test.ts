@@ -155,4 +155,15 @@ describe('parseConfig', () => {
     }));
     expect(infos.some((i) => i.includes('DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE'))).toBe(true);
   });
+
+  // --- Reaction remove handler ---
+  it('defaults reactionRemoveHandlerEnabled to false', () => {
+    const { config } = parseConfig(env());
+    expect(config.reactionRemoveHandlerEnabled).toBe(false);
+  });
+
+  it('parses DISCOCLAW_REACTION_REMOVE_HANDLER=1 as true', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_REACTION_REMOVE_HANDLER: '1' }));
+    expect(config.reactionRemoveHandlerEnabled).toBe(true);
+  });
 });

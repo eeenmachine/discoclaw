@@ -14,6 +14,7 @@ export type HealthConfigSnapshot = {
   durableMemoryEnabled: boolean;
   messageHistoryBudget: number;
   reactionHandlerEnabled: boolean;
+  reactionRemoveHandlerEnabled: boolean;
   cronEnabled: boolean;
   beadsEnabled: boolean;
   requireChannelContext: boolean;
@@ -70,7 +71,7 @@ export function renderHealthReport(opts: {
     lines.push(`runtimeSessions=${opts.config.useRuntimeSessions} toolAwareStreaming=${opts.config.toolAwareStreaming} maxConcurrent=${opts.config.maxConcurrentInvocations}`);
     lines.push(`actions=${opts.config.discordActionsEnabled} summary=${opts.config.summaryEnabled} durableMemory=${opts.config.durableMemoryEnabled}`);
     lines.push(`historyBudget=${opts.config.messageHistoryBudget} requireChannelContext=${opts.config.requireChannelContext} autoIndexContext=${opts.config.autoIndexChannelContext}`);
-    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} cron=${opts.config.cronEnabled} beads=${opts.config.beadsEnabled}`);
+    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} cron=${opts.config.cronEnabled} beads=${opts.config.beadsEnabled}`);
 
     const errorClasses = Object.keys(counters)
       .filter((k) => k.includes('.error_class.'))

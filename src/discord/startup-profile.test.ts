@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { ActivityType } from 'discord.js';
+import { ActivityType, GatewayIntentBits } from 'discord.js';
 
 // We test the startup logic by calling startDiscordBot with mocked Client.
 // The module under test is src/discord.ts — we import startDiscordBot.
@@ -113,6 +113,7 @@ function baseParams(overrides: Partial<BotParams> = {}): BotParams {
     memoryCommandsEnabled: false,
     actionFollowupDepth: 0,
     reactionHandlerEnabled: false,
+    reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
     ...overrides,
   };
@@ -206,5 +207,32 @@ describe('startup avatar', () => {
       expect.objectContaining({ err: expect.any(Error), avatar: 'https://example.com/avatar.png' }),
       'discord:avatar failed to set',
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reaction remove handler wiring tests
+// ---------------------------------------------------------------------------
+
+describe('reaction remove handler wiring', () => {
+  it('registers messageReactionRemove listener when reactionRemoveHandlerEnabled is true', async () => {
+    await startDiscordBot(baseParams({ reactionRemoveHandlerEnabled: true }));
+    const onCalls = mockClientInstance.on.mock.calls;
+    const events = onCalls.map((c: any[]) => c[0]);
+    expect(events).toContain('messageReactionRemove');
+  });
+
+  it('does NOT register messageReactionRemove listener when reactionRemoveHandlerEnabled is false', async () => {
+    await startDiscordBot(baseParams({ reactionRemoveHandlerEnabled: false }));
+    const onCalls = mockClientInstance.on.mock.calls;
+    const events = onCalls.map((c: any[]) => c[0]);
+    expect(events).not.toContain('messageReactionRemove');
+  });
+
+  it('enables GuildMessageReactions intent when only remove handler is enabled (add disabled)', async () => {
+    const { Client } = await import('discord.js');
+    await startDiscordBot(baseParams({ reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: true }));
+    const constructorCall = (Client as any).mock.calls.at(-1)[0];
+    expect(constructorCall.intents).toContain(GatewayIntentBits.GuildMessageReactions);
   });
 });

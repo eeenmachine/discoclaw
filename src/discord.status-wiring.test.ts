@@ -60,6 +60,7 @@ function baseParams(runtimeOverride: any) {
     memoryCommandsEnabled: false,
     actionFollowupDepth: 0,
     reactionHandlerEnabled: false,
+    reactionRemoveHandlerEnabled: false,
     reactionMaxAgeMs: 86400000,
   };
 }

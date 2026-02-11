@@ -49,6 +49,7 @@ export type DiscoclawConfig = {
   actionFollowupDepth: number;
 
   reactionHandlerEnabled: boolean;
+  reactionRemoveHandlerEnabled: boolean;
   reactionMaxAgeHours: number;
 
   statusChannel?: string;
@@ -327,6 +328,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       actionFollowupDepth: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', 3),
 
       reactionHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_HANDLER', true),
+      reactionRemoveHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_REMOVE_HANDLER', false),
       reactionMaxAgeHours: parseNonNegativeNumber(env, 'DISCOCLAW_REACTION_MAX_AGE_HOURS', 24),
 
       statusChannel: parseTrimmedString(env, 'DISCOCLAW_STATUS_CHANNEL'),

@@ -25,7 +25,7 @@ import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
-import { createReactionAddHandler } from './discord/reaction-handler.js';
+import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { editThenSendChunks } from './discord/output-common.js';
@@ -89,6 +89,7 @@ export type BotParams = {
   toolAwareStreaming?: boolean;
   actionFollowupDepth: number;
   reactionHandlerEnabled: boolean;
+  reactionRemoveHandlerEnabled: boolean;
   reactionMaxAgeMs: number;
   healthCommandsEnabled?: boolean;
   healthVerboseAllowlist?: Set<string>;
@@ -227,6 +228,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           durableMemoryEnabled: params.durableMemoryEnabled,
           messageHistoryBudget: params.messageHistoryBudget,
           reactionHandlerEnabled: params.reactionHandlerEnabled,
+          reactionRemoveHandlerEnabled: params.reactionRemoveHandlerEnabled,
           cronEnabled: Boolean(params.cronCtx),
           beadsEnabled: Boolean(params.beadCtx),
           requireChannelContext: params.requireChannelContext,
@@ -779,11 +781,11 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.DirectMessages,
-      ...(params.reactionHandlerEnabled ? [GatewayIntentBits.GuildMessageReactions] : []),
+      ...((params.reactionHandlerEnabled || params.reactionRemoveHandlerEnabled) ? [GatewayIntentBits.GuildMessageReactions] : []),
     ],
     partials: [
       Partials.Channel,
-      ...(params.reactionHandlerEnabled ? [Partials.Message, Partials.Reaction, Partials.User] : []),
+      ...((params.reactionHandlerEnabled || params.reactionRemoveHandlerEnabled) ? [Partials.Message, Partials.Reaction, Partials.User] : []),
     ],
   });
 
@@ -796,6 +798,10 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
 
   if (params.reactionHandlerEnabled) {
     client.on('messageReactionAdd', createReactionAddHandler(params, queue, statusRef));
+  }
+
+  if (params.reactionRemoveHandlerEnabled) {
+    client.on('messageReactionRemove', createReactionRemoveHandler(params, queue, statusRef));
   }
 
   if (params.autoJoinThreads) {

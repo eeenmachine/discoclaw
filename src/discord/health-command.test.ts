@@ -33,6 +33,7 @@ describe('renderHealthReport', () => {
         durableMemoryEnabled: true,
         messageHistoryBudget: 3000,
         reactionHandlerEnabled: false,
+        reactionRemoveHandlerEnabled: false,
         cronEnabled: true,
         beadsEnabled: false,
         requireChannelContext: true,

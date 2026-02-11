@@ -126,6 +126,7 @@ const durableMaxItems = cfg.durableMaxItems;
 const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
 const actionFollowupDepth = cfg.actionFollowupDepth;
 const reactionHandlerEnabled = cfg.reactionHandlerEnabled;
+const reactionRemoveHandlerEnabled = cfg.reactionRemoveHandlerEnabled;
 const reactionMaxAgeHours = cfg.reactionMaxAgeHours;
 const reactionMaxAgeMs = reactionMaxAgeHours * 60 * 60 * 1000;
 const healthCommandsEnabled = cfg.healthCommandsEnabled;
@@ -300,6 +301,7 @@ const botParams = {
   toolAwareStreaming,
   actionFollowupDepth,
   reactionHandlerEnabled,
+  reactionRemoveHandlerEnabled,
   reactionMaxAgeMs,
   healthCommandsEnabled,
   healthVerboseAllowlist,
@@ -319,6 +321,7 @@ const botParams = {
     durableMemoryEnabled,
     messageHistoryBudget,
     reactionHandlerEnabled,
+    reactionRemoveHandlerEnabled,
     cronEnabled,
     beadsEnabled,
     requireChannelContext,
@@ -505,6 +508,9 @@ if (cronEnabled && effectiveCronForum) {
 
 if (reactionHandlerEnabled) {
   log.info({ reactionMaxAgeHours }, 'reaction:handler enabled');
+}
+if (reactionRemoveHandlerEnabled) {
+  log.info({ reactionMaxAgeHours }, 'reaction-remove:handler enabled');
 }
 
 log.info('Discord bot started');
