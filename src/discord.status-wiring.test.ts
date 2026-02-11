@@ -57,6 +57,8 @@ function baseParams(runtimeOverride: any) {
     durableMaxItems: 200,
     memoryCommandsEnabled: false,
     actionFollowupDepth: 0,
+    reactionHandlerEnabled: false,
+    reactionMaxAgeMs: 86400000,
   };
 }
 

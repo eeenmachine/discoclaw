@@ -93,6 +93,8 @@ function baseParams(runtimeOverride: any, overrides: Partial<any> = {}) {
     durableMaxItems: 200,
     memoryCommandsEnabled: false,
     actionFollowupDepth: 3,
+    reactionHandlerEnabled: false,
+    reactionMaxAgeMs: 24 * 60 * 60 * 1000,
     ...overrides,
   };
 }
