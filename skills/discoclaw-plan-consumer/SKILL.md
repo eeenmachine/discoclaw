@@ -1,6 +1,6 @@
 ---
 name: discoclaw-plan-consumer
-description: Consume a shared `*.discoclaw-plan.md` file and produce a decision-complete, local-repo implementation checklist with risk-gated validation and plan-first execution behavior.
+description: Consume a shared `*.discoclaw-plan.md` file and produce a decision-complete, local-repo implementation checklist with YAML metadata validation, risk-gated contract validation, and plan-first execution behavior.
 ---
 
 # Discoclaw Plan Consumer
@@ -18,10 +18,10 @@ Default mode is plan-first apply.
 ## Validation Workflow
 
 1. Confirm filename pattern and required headings from `docs/discoclaw-plan-spec.md`.
-2. Read `risk_level` from metadata.
+2. Validate YAML frontmatter and read `risk_level` from frontmatter metadata.
 3. Apply risk-gated JSON checks:
-   - `low`: JSON blocks optional, but section prose must still be complete.
-   - `medium/high`: `metadata`, `implementation_contract`, and `acceptance_contract` JSON blocks are mandatory.
+   - `low`: `implementation_contract` and `acceptance_contract` JSON blocks are optional, but section prose must still be complete.
+   - `medium/high`: `implementation_contract` and `acceptance_contract` JSON blocks are mandatory.
 4. Verify mandatory attribution and safety fields exist:
    - Author/source/license
    - Risk rationale

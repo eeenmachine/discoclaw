@@ -1,32 +1,34 @@
+---
+spec_version: "1.0"
+plan_id: "replace-with-kebab-id"
+title: "Replace with clear integration title"
+author: "Your name or handle"
+source: "manual"
+license: "MIT"
+created_at: "2026-02-11T00:00:00Z"
+integration_type: "runtime"
+discoclaw_min_version: "0.1.0"
+risk_level: "low"
+---
+
 <!--
 Author instructions (remove before sharing):
 - Keep required headings exactly as written.
-- For low-risk plans, JSON blocks are recommended but optional.
-- For medium/high-risk plans, JSON blocks are required.
+- Use YAML frontmatter for metadata in all plans.
+- For low-risk plans, JSON contract blocks are recommended but optional.
+- For medium/high-risk plans, JSON contract blocks are required.
 -->
 
 # Discoclaw Plan
 
 ## Metadata
 
-`metadata` JSON block (required for medium/high risk; recommended for low risk):
+Canonical metadata lives in YAML frontmatter.
 
-```json
-{
-  "spec_version": "1.0",
-  "plan_id": "replace-with-kebab-id",
-  "title": "Replace with clear integration title",
-  "author": "Your name or handle",
-  "source": "manual",
-  "license": "MIT",
-  "created_at": "2026-02-11T00:00:00Z",
-  "integration_type": "runtime",
-  "discoclaw_min_version": "0.1.0",
-  "risk_level": "low"
-}
-```
+Optional notes:
 
-If using low-risk lite mode without JSON, include key/value lines for the same fields.
+- Distribution notes:
+- Ownership notes:
 
 ## Use Case
 
@@ -75,6 +77,8 @@ Out of scope:
 }
 ```
 
+If omitting JSON for low-risk plans, include equivalent prose for files, env/config, behavior, and out-of-scope.
+
 Local repo mapping:
 
 - Primary entrypoints:
@@ -118,6 +122,8 @@ Compatibility notes:
 }
 ```
 
+If omitting JSON for low-risk plans, include equivalent prose for scenarios and expected outcomes.
+
 Manual test notes:
 
 - Test account/channel assumptions:
@@ -148,7 +154,7 @@ Rollback plan:
 Use this prompt when another Discoclaw user asks their agent to implement this plan:
 
 ```text
-Read this .discoclaw-plan.md file and produce a decision-complete implementation checklist mapped to local repo files. Validate required headings and risk-gated JSON requirements first. Do not start coding until explicitly asked.
+Read this .discoclaw-plan.md file and produce a decision-complete implementation checklist mapped to local repo files. Validate required headings, YAML frontmatter metadata, and risk-gated JSON contract requirements first. Do not start coding until explicitly asked.
 ```
 
 ## Changelog
@@ -158,7 +164,8 @@ Read this .discoclaw-plan.md file and produce a decision-complete implementation
 Human approval checklist:
 
 - [ ] Required headings are present.
+- [ ] YAML frontmatter metadata is complete.
 - [ ] Metadata includes author/source/license.
 - [ ] Risk, permissions, and rollback are explicit.
-- [ ] JSON blocks satisfy risk-level requirements.
+- [ ] JSON contract blocks satisfy risk-level requirements.
 - [ ] Handoff prompt is included and clear.

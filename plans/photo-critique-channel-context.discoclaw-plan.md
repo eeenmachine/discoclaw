@@ -1,17 +1,21 @@
+---
+spec_version: "1.0"
+plan_id: "photo-critique-channel-context"
+title: "Photo Critique Channel Context Preset"
+author: "Discoclaw Community Example"
+source: "manual"
+license: "MIT"
+created_at: "2026-02-11T00:00:00Z"
+integration_type: "context"
+discoclaw_min_version: "0.1.0"
+risk_level: "low"
+---
+
 # Discoclaw Plan
 
 ## Metadata
 
-- `spec_version`: `1.0`
-- `plan_id`: `photo-critique-channel-context`
-- `title`: `Photo Critique Channel Context Preset`
-- `author`: `Discoclaw Community Example`
-- `source`: `manual`
-- `license`: `MIT`
-- `created_at`: `2026-02-11T00:00:00Z`
-- `integration_type`: `context`
-- `discoclaw_min_version`: `0.1.0`
-- `risk_level`: `low`
+Canonical metadata lives in YAML frontmatter.
 
 ## Use Case
 
@@ -70,13 +74,12 @@ Compatibility notes:
 
 Scenarios:
 
-1. Happy path:
-- Send a photo critique request in the configured channel.
-- Expected: response follows structured critique format.
-
-2. Isolation:
-- Send same request in a different channel.
-- Expected: no critique-specific formatting unless that channel has its own context file.
+- Happy path:
+  Send a photo critique request in the configured channel.
+  Expected: response follows structured critique format.
+- Isolation:
+  Send the same request in a different channel.
+  Expected: no critique-specific formatting unless that channel has its own context file.
 
 Required checks:
 
@@ -101,7 +104,7 @@ Rollback plan:
 ## Handoff Prompt (Consumer Agent)
 
 ```text
-Read this low-risk context plan and produce a local implementation checklist. Since this is low risk, treat missing JSON blocks as acceptable if section prose is complete. Do not edit code until explicitly asked.
+Read this low-risk context plan and produce a local implementation checklist. Since this is low risk, treat missing JSON contract blocks as acceptable if section prose is complete. Do not edit code until explicitly asked.
 ```
 
 ## Changelog

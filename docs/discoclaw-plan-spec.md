@@ -19,24 +19,28 @@ Example:
 
 - `plans/openai-compatible-runtime-adapter.discoclaw-plan.md`
 
-## Required Headings
+## Canonical Metadata Format (Required)
 
-Every file must include these headings exactly once:
+Every plan must include YAML frontmatter at the top of the file.
 
-1. `# Discoclaw Plan`
-2. `## Metadata`
-3. `## Use Case`
-4. `## Scope`
-5. `## Integration Contract`
-6. `## Implementation Steps`
-7. `## Acceptance Tests`
-8. `## Risk, Permissions, Rollback`
-9. `## Handoff Prompt (Consumer Agent)`
-10. `## Changelog`
+```yaml
+---
+spec_version: "1.0"
+plan_id: "example-plan-id"
+title: "Example Integration"
+author: "Name or handle"
+source: "manual"
+license: "MIT"
+created_at: "2026-02-11T00:00:00Z"
+integration_type: "runtime"
+discoclaw_min_version: "0.1.0"
+risk_level: "medium"
+---
+```
 
 ## Required Metadata Fields
 
-Every plan must include all fields below, either in a `metadata` JSON block or explicit markdown key/value lines in `## Metadata`.
+Frontmatter must include all fields below:
 
 - `spec_version`
 - `plan_id`
@@ -58,37 +62,35 @@ Every plan must include all fields below, either in a `metadata` JSON block or e
 - `integration_type`: one of `runtime`, `actions`, `context`.
 - `risk_level`: one of `low`, `medium`, `high`.
 
+## Required Headings
+
+Every file must include these headings exactly once:
+
+1. `# Discoclaw Plan`
+2. `## Metadata`
+3. `## Use Case`
+4. `## Scope`
+5. `## Integration Contract`
+6. `## Implementation Steps`
+7. `## Acceptance Tests`
+8. `## Risk, Permissions, Rollback`
+9. `## Handoff Prompt (Consumer Agent)`
+10. `## Changelog`
+
 ## Risk-Based JSON Requirements
 
-The format uses required markdown headings for all plans, and risk-gated JSON strictness.
+The format uses required markdown headings for all plans, and risk-gated JSON strictness for structured contracts.
 
 - `low` risk:
-  - `metadata`, `implementation_contract`, and `acceptance_contract` JSON fences are recommended.
+  - `implementation_contract` and `acceptance_contract` JSON fences are recommended.
   - A plan may omit those JSON fences if section prose is complete.
 - `medium` or `high` risk:
-  - `metadata`, `implementation_contract`, and `acceptance_contract` JSON fences are required.
+  - `implementation_contract` and `acceptance_contract` JSON fences are required.
   - Missing required JSON is a validation failure for consumers.
 
 ## JSON Block Contracts
 
 For `medium/high`, include these fenced blocks.
-
-### `metadata`
-
-```json
-{
-  "spec_version": "1.0",
-  "plan_id": "example-plan-id",
-  "title": "Example Integration",
-  "author": "Name or handle",
-  "source": "manual",
-  "license": "MIT",
-  "created_at": "2026-02-11T00:00:00Z",
-  "integration_type": "runtime",
-  "discoclaw_min_version": "0.1.0",
-  "risk_level": "medium"
-}
-```
 
 ### `implementation_contract`
 
@@ -125,6 +127,15 @@ For `medium/high`, include these fenced blocks.
 }
 ```
 
+If `low` risk plans omit JSON contracts, prose must still clearly state:
+
+- Files to add/modify
+- Environment/config changes
+- Behavior changes
+- Out-of-scope constraints
+- Test scenarios and expected outcomes
+- Required checks (`pnpm build`, `pnpm test`)
+
 ## Safety Requirements
 
 Every plan must include all of the following in `## Risk, Permissions, Rollback`:
@@ -145,8 +156,8 @@ Use `integration_type` to classify plans:
 
 Consumers should use plan-first apply:
 
-1. Validate required headings.
-2. Read risk level.
+1. Validate YAML frontmatter and required headings.
+2. Read risk level from frontmatter.
 3. Enforce risk-based JSON rules.
 4. Produce a local implementation checklist mapped to actual repo paths.
 5. Do not start coding until explicitly asked.
@@ -162,7 +173,8 @@ Consumers should use plan-first apply:
 Before sharing, verify:
 
 - Filename uses `.discoclaw-plan.md` suffix.
+- YAML frontmatter exists and includes all required metadata fields.
 - All required headings exist.
 - Metadata includes author/source/license.
 - Risk/permissions/rollback is explicit.
-- `medium/high` plans include all three required JSON blocks.
+- `medium/high` plans include both required JSON contract blocks.

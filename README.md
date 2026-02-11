@@ -69,6 +69,8 @@ Discoclaw supports a shareable markdown plan format for passing integrations bet
 - Skills:
   - `skills/discoclaw-plan-generator/SKILL.md`
   - `skills/discoclaw-plan-consumer/SKILL.md`
+- Install/refresh invocable skill symlinks:
+  - `pnpm claude:install-skills`
 
 Author one plan file for an integration, share it, then let another user's Discoclaw agent consume it and produce a local implementation checklist before coding.
 

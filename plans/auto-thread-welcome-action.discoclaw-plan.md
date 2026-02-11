@@ -1,21 +1,21 @@
+---
+spec_version: "1.0"
+plan_id: "auto-thread-welcome-action"
+title: "Auto Thread Welcome Message Action"
+author: "Discoclaw Community Example"
+source: "manual"
+license: "MIT"
+created_at: "2026-02-11T00:00:00Z"
+integration_type: "actions"
+discoclaw_min_version: "0.1.0"
+risk_level: "medium"
+---
+
 # Discoclaw Plan
 
 ## Metadata
 
-```json
-{
-  "spec_version": "1.0",
-  "plan_id": "auto-thread-welcome-action",
-  "title": "Auto Thread Welcome Message Action",
-  "author": "Discoclaw Community Example",
-  "source": "manual",
-  "license": "MIT",
-  "created_at": "2026-02-11T00:00:00Z",
-  "integration_type": "actions",
-  "discoclaw_min_version": "0.1.0",
-  "risk_level": "medium"
-}
-```
+Canonical metadata lives in YAML frontmatter.
 
 ## Use Case
 
@@ -35,6 +35,8 @@ Out of scope:
 - Cross-server auto-configuration.
 
 ## Integration Contract
+
+`implementation_contract`:
 
 ```json
 {
@@ -92,6 +94,8 @@ Compatibility notes:
 5. Update docs and env examples.
 
 ## Acceptance Tests
+
+`acceptance_contract`:
 
 ```json
 {

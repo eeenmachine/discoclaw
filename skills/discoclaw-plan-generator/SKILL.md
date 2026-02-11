@@ -1,6 +1,6 @@
 ---
 name: discoclaw-plan-generator
-description: Generate a spec-compliant `plans/*.discoclaw-plan.md` file for shareable Discoclaw integrations (runtime, actions, or context), including risk-gated JSON blocks, safety details, and a consumer handoff prompt.
+description: Generate a spec-compliant `plans/*.discoclaw-plan.md` file for shareable Discoclaw integrations (runtime, actions, or context), including YAML frontmatter metadata, risk-gated JSON contracts, safety details, and a consumer handoff prompt.
 ---
 
 # Discoclaw Plan Generator
@@ -29,12 +29,15 @@ Create exactly one markdown file at:
 
 - `plans/<kebab-slug>.discoclaw-plan.md`
 
-The file must include all required headings from `docs/discoclaw-plan-spec.md`.
+The file must include:
+
+- YAML frontmatter with all required metadata fields
+- All required headings from `docs/discoclaw-plan-spec.md`
 
 Risk-gated JSON behavior:
 
-- `low` risk: JSON blocks are recommended; allow lite mode without JSON if prose is complete.
-- `medium/high` risk: include `metadata`, `implementation_contract`, and `acceptance_contract` fenced JSON blocks.
+- `low` risk: `implementation_contract` and `acceptance_contract` JSON blocks are recommended; prose-only is allowed if complete.
+- `medium/high` risk: `implementation_contract` and `acceptance_contract` fenced JSON blocks are required.
 
 ## Safety Requirements
 
@@ -44,7 +47,7 @@ Always include in `## Risk, Permissions, Rollback`:
 - Required permissions/capabilities
 - Explicit rollback steps
 
-Always include attribution fields:
+Always include attribution fields in frontmatter:
 
 - `author`
 - `source`
@@ -55,7 +58,7 @@ Always include attribution fields:
 Before finalizing, verify:
 
 1. Filename ends with `.discoclaw-plan.md`.
-2. Required headings exist exactly once.
-3. Metadata fields are complete.
-4. JSON blocks satisfy risk-level rules.
+2. YAML frontmatter is present and complete.
+3. Required headings exist exactly once.
+4. JSON contract blocks satisfy risk-level rules.
 5. Handoff prompt is present and plan-first (no auto-code by default).

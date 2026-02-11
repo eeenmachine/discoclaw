@@ -1,21 +1,21 @@
+---
+spec_version: "1.0"
+plan_id: "openai-compatible-runtime-adapter"
+title: "OpenAI-Compatible Runtime Adapter"
+author: "Discoclaw Community Example"
+source: "manual"
+license: "MIT"
+created_at: "2026-02-11T00:00:00Z"
+integration_type: "runtime"
+discoclaw_min_version: "0.1.0"
+risk_level: "medium"
+---
+
 # Discoclaw Plan
 
 ## Metadata
 
-```json
-{
-  "spec_version": "1.0",
-  "plan_id": "openai-compatible-runtime-adapter",
-  "title": "OpenAI-Compatible Runtime Adapter",
-  "author": "Discoclaw Community Example",
-  "source": "manual",
-  "license": "MIT",
-  "created_at": "2026-02-11T00:00:00Z",
-  "integration_type": "runtime",
-  "discoclaw_min_version": "0.1.0",
-  "risk_level": "medium"
-}
-```
+Canonical metadata lives in YAML frontmatter.
 
 ## Use Case
 
@@ -35,6 +35,8 @@ Out of scope:
 - Vendor-specific tool emulation beyond existing runtime interface.
 
 ## Integration Contract
+
+`implementation_contract`:
 
 ```json
 {
@@ -99,6 +101,8 @@ Compatibility notes:
 
 ## Acceptance Tests
 
+`acceptance_contract`:
+
 ```json
 {
   "scenarios": [
@@ -155,7 +159,7 @@ Rollback plan:
 ## Handoff Prompt (Consumer Agent)
 
 ```text
-Read this .discoclaw-plan.md and produce a decision-complete implementation checklist for this repo. Validate medium-risk JSON blocks first. Do not code until explicitly asked.
+Read this .discoclaw-plan.md and produce a decision-complete implementation checklist for this repo. Validate medium-risk JSON contract blocks first. Do not code until explicitly asked.
 ```
 
 ## Changelog
