@@ -19,14 +19,31 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 [[ -z "$COMMAND" ]] && exit 0
 
 # Only match direct `bd close ...` commands (not inside scripts/pipes/subshells).
-[[ "$COMMAND" =~ ^[[:space:]]*bd[[:space:]]+close[[:space:]] ]] || exit 0
+# Also match bare `bd close` (no trailing space) for zero-arg close.
+[[ "$COMMAND" =~ ^[[:space:]]*bd[[:space:]]+close($|[[:space:]]) ]] || exit 0
 
-# Extract bead IDs (same pattern as bd-close-archive.sh).
+# Try to extract bead IDs from the command args.
 BEAD_IDS=()
+SEEN_CLOSE=0
 for word in $COMMAND; do
-  [[ "$word" == "bd" || "$word" == "close" || "$word" == -* ]] && continue
+  [[ "$word" == "bd" ]] && continue
+  [[ "$word" == "close" ]] && { SEEN_CLOSE=1; continue; }
+  [[ $SEEN_CLOSE -eq 0 ]] && continue
+  # Skip flags and their values (--reason "foo" etc).
+  [[ "$word" == -* ]] && continue
   [[ "$word" =~ ^[a-z]+-[a-z0-9]+$ ]] && BEAD_IDS+=("$word")
 done
+
+# Fallback: if no IDs on command line (zero-arg close), parse stdout.
+# bd outputs "✓ Closed <bead-id>: ..." for each closed bead.
+if [[ ${#BEAD_IDS[@]} -eq 0 ]]; then
+  STDOUT=$(echo "$INPUT" | jq -r '.tool_response.stdout // ""')
+  while IFS= read -r line; do
+    if [[ "$line" =~ Closed[[:space:]]+([a-z]+-[a-z0-9]+) ]]; then
+      BEAD_IDS+=("${BASH_REMATCH[1]}")
+    fi
+  done <<< "$STDOUT"
+fi
 
 [[ ${#BEAD_IDS[@]} -eq 0 ]] && exit 0
 
