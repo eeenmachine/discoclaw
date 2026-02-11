@@ -29,7 +29,12 @@ function mockLog() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 }
 
+function mockReplyObject() {
+  return { edit: vi.fn().mockResolvedValue(undefined) };
+}
+
 function mockMessage(overrides?: Record<string, any>) {
+  const replyObj = mockReplyObject();
   return {
     id: 'msg-1',
     content: 'Hello world',
@@ -58,7 +63,8 @@ function mockMessage(overrides?: Record<string, any>) {
     },
     attachments: { size: 0, values: () => [] },
     embeds: [],
-    reply: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(replyObj),
+    _replyObj: replyObj,
     fetch: vi.fn(),
     ...overrides,
   };
@@ -204,8 +210,13 @@ describe('createReactionAddHandler', () => {
     await handler(reaction as any, mockUser() as any);
 
     expect(queue.run).toHaveBeenCalledOnce();
+    // Immediate placeholder reply.
     expect(reaction.message.reply).toHaveBeenCalledOnce();
-    expect(reaction.message.reply.mock.calls[0][0].content).toContain('Reaction response!');
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit on the reply object.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Reaction response!');
   });
 
   it('prompt includes emoji name, original message content, reacting user, and channel label', async () => {
@@ -348,8 +359,13 @@ describe('createReactionAddHandler', () => {
     const reaction = mockReaction();
     await handler(reaction as any, mockUser() as any);
 
+    // Placeholder posted first.
     expect(reaction.message.reply).toHaveBeenCalledOnce();
-    const replyContent: string = reaction.message.reply.mock.calls[0][0].content;
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
     // The action block should be stripped from the clean text.
     expect(replyContent).not.toContain('<discord-action>');
     // Action results (Done: or Failed:) should be appended.
@@ -431,9 +447,12 @@ describe('createReactionAddHandler', () => {
 
     expect(params.log?.error).toHaveBeenCalled();
     expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
-    expect(reaction.message.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining('Runtime error: timeout reached') }),
-    );
+    // Placeholder first, then error via edit on the reply object.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Runtime error: timeout reached');
   });
 
   it('joins thread before replying when autoJoinThreads is enabled', async () => {
@@ -459,7 +478,9 @@ describe('createReactionAddHandler', () => {
     await handler(reaction as any, mockUser() as any);
 
     expect(joinFn).toHaveBeenCalledOnce();
+    // Placeholder reply posted.
     expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
   });
 
   it('passes addDirs to runtime.invoke when useGroupDirCwd is active', async () => {
@@ -573,8 +594,13 @@ describe('createReactionRemoveHandler', () => {
     await handler(reaction as any, mockUser() as any);
 
     expect(queue.run).toHaveBeenCalledOnce();
+    // Immediate placeholder reply.
     expect(reaction.message.reply).toHaveBeenCalledOnce();
-    expect(reaction.message.reply.mock.calls[0][0].content).toContain('Reaction response!');
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit on the reply object.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Reaction response!');
   });
 
   it('prompt contains "removed their" and does NOT contain "reacted with"', async () => {
@@ -663,8 +689,96 @@ describe('createReactionRemoveHandler', () => {
 
     expect(params.log?.error).toHaveBeenCalled();
     expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
-    expect(reaction.message.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.stringContaining('Runtime error: timeout reached') }),
-    );
+    // Placeholder first, then error via edit.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Runtime error: timeout reached');
+  });
+});
+
+describe('streaming behavior', () => {
+  it('emits multiple edits for text_delta events (throttled)', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          yield { type: 'text_delta', text: 'Hello ' };
+          yield { type: 'text_delta', text: 'world' };
+          yield { type: 'text_final', text: 'Hello world' };
+          yield { type: 'done' };
+        },
+      };
+      const params = makeParams({ runtime });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      await handler(reaction as any, mockUser() as any);
+
+      const replyObj = reaction.message._replyObj;
+      // At least the forced final edit should have happened.
+      expect(replyObj.edit).toHaveBeenCalled();
+      // Last edit should contain final text.
+      const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+      expect(lastCall[0].content).toContain('Hello world');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('streams log_line events into delta text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'log_line', stream: 'stdout', line: 'building...' };
+        yield { type: 'log_line', stream: 'stderr', line: 'warn: deprecated' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    // Some intermediate edit should contain the log lines.
+    const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
+    const hasStdout = allEditContents.some((c: string) => c.includes('[stdout]'));
+    const hasStderr = allEditContents.some((c: string) => c.includes('[stderr]'));
+    expect(hasStdout).toBe(true);
+    expect(hasStderr).toBe(true);
+  });
+
+  it('cleans up stale placeholder on handler error after reply was created', async () => {
+    // Runtime that throws after yielding nothing.
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        throw new Error('unexpected crash');
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Placeholder was posted.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    // Reply should be edited with error message (not left as "Thinking.").
+    const replyObj = reaction.message._replyObj;
+    expect(replyObj.edit).toHaveBeenCalled();
+    const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastCall[0].content).toMatch(/error|unexpected/i);
   });
 });

@@ -9,8 +9,10 @@ import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './actions.js';
 import type { ActionCategoryFlags } from './actions.js';
 import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
-import { replyThenSendChunks } from './output-common.js';
-import { downloadMessageImages } from './image-download.js';
+import { editThenSendChunks } from './output-common.js';
+import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
+import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 
@@ -109,6 +111,8 @@ function createReactionHandler(
 
       // 8. Queue.
       await queue.run(sessionKey, async () => {
+        const msg = reaction.message;
+        let reply: { edit: (opts: any) => Promise<unknown> } | null = null;
         try {
           // Join thread if needed.
           if (params.autoJoinThreads && isThread) {
@@ -123,6 +127,11 @@ function createReactionHandler(
               }
             }
           }
+
+          reply = await (msg as any).reply({
+            content: formatBoldLabel(thinkingLabel(0)),
+            allowedMentions: NO_MENTIONS,
+          });
 
           const cwd = params.useGroupDirCwd
             ? await ensureGroupDir(params.groupsDir, sessionKey, params.botDisplayName)
@@ -177,7 +186,6 @@ function createReactionHandler(
 
           // Build prompt.
           const emoji = reaction.emoji.name ?? '(unknown)';
-          const msg = reaction.message;
           const messageContent = String(msg.content ?? '').slice(0, 1500);
           const messageAuthor = msg.author?.displayName || msg.author?.username || 'Unknown';
           const messageAuthorId = msg.author?.id ?? 'unknown';
@@ -207,7 +215,7 @@ function createReactionHandler(
             `Original message by ${messageAuthor} (ID: ${messageAuthorId}):\n` +
             messageContent;
 
-          // Download image attachments; non-image attachments are silently ignored.
+          // Download image attachments and surface non-image attachment URLs as text.
           let inputImages: ImageData[] | undefined;
           if (msg.attachments && msg.attachments.size > 0) {
             try {
@@ -218,10 +226,19 @@ function createReactionHandler(
               }
               if (dlResult.errors.length > 0) {
                 params.log?.warn({ errors: dlResult.errors }, `${logPrefix}:image download errors`);
+                metrics.increment('discord.image_download.errors', dlResult.errors.length);
                 prompt += `\n(Note: ${dlResult.errors.length} image(s) could not be loaded: ${dlResult.errors.join('; ')})`;
               }
             } catch (err) {
               params.log?.warn({ err }, `${logPrefix}:image download failed`);
+            }
+
+            // Surface non-image attachments as URLs in the prompt (PDFs, text files, etc.).
+            const nonImageUrls = [...msg.attachments.values()]
+              .filter((a) => !resolveMediaType(a))
+              .map((a) => a.url);
+            if (nonImageUrls.length > 0) {
+              prompt += `\nAttachments: ${nonImageUrls.join(', ')}`;
             }
           }
 
@@ -290,44 +307,79 @@ function createReactionHandler(
             `${logPrefix}:invoke:start`,
           );
 
-          // Non-streaming collect pattern (like cron executor).
+          // Streaming pattern (matches discord.ts flat mode).
           // Both add and remove handlers record under the 'reaction' invoke flow so
           // latency lands in MetricsRegistry.latencies.reaction (avoids InvokeFlow
           // type change). Volume is split by the separate received/error counters.
           let finalText = '';
           let deltaText = '';
           const collectedImages: ImageData[] = [];
+          let statusTick = 1;
           const t0 = Date.now();
           metrics.recordInvokeStart('reaction');
           params.log?.info({ flow: 'reaction', sessionKey }, 'obs.invoke.start');
           let invokeError: string | null = null;
-          for await (const evt of params.runtime.invoke({
-            prompt,
-            model: params.runtimeModel,
-            cwd,
-            addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
-            sessionId,
-            sessionKey,
-            tools: effectiveTools,
-            timeoutMs: params.runtimeTimeoutMs,
-            images: inputImages,
-          })) {
-            if (evt.type === 'text_final') {
-              finalText = evt.text;
-            } else if (evt.type === 'text_delta') {
-              deltaText += evt.text;
-            } else if (evt.type === 'image_data') {
-              collectedImages.push(evt.image);
-            } else if (evt.type === 'error') {
-              invokeError = evt.message;
-              metrics.recordInvokeResult('reaction', Date.now() - t0, false, evt.message);
-              params.log?.error({ sessionKey, error: evt.message }, `${logPrefix}:runtime error`);
-              params.log?.warn({ flow: 'reaction', sessionKey, error: evt.message }, 'obs.invoke.error');
-              // eslint-disable-next-line @typescript-eslint/no-floating-promises
-              statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
-              await replyThenSendChunks(reaction.message as any, mapRuntimeErrorToUserMessage(evt.message));
-              return;
+          let lastEditAt = 0;
+          const minEditIntervalMs = 1250;
+
+          const maybeEdit = async (force = false) => {
+            if (!reply) return;
+            const now = Date.now();
+            if (!force && now - lastEditAt < minEditIntervalMs) return;
+            lastEditAt = now;
+            const out = selectStreamingOutput({
+              deltaText, activityLabel: '', finalText,
+              statusTick: statusTick++,
+              showPreview: Date.now() - t0 >= 7000,
+            });
+            try {
+              await reply.edit({ content: out, allowedMentions: NO_MENTIONS });
+            } catch { /* ignore Discord edit errors during streaming */ }
+          };
+
+          const keepalive = setInterval(() => {
+            // eslint-disable-next-line @typescript-eslint/no-floating-promises
+            maybeEdit(true);
+          }, 5000);
+
+          try {
+            for await (const evt of params.runtime.invoke({
+              prompt,
+              model: params.runtimeModel,
+              cwd,
+              addDirs: addDirs.length > 0 ? Array.from(new Set(addDirs)) : undefined,
+              sessionId,
+              sessionKey,
+              tools: effectiveTools,
+              timeoutMs: params.runtimeTimeoutMs,
+              images: inputImages,
+            })) {
+              if (evt.type === 'text_final') {
+                finalText = evt.text;
+                await maybeEdit(true);
+              } else if (evt.type === 'text_delta') {
+                deltaText += evt.text;
+                await maybeEdit(false);
+              } else if (evt.type === 'log_line') {
+                const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
+                deltaText += (deltaText && !deltaText.endsWith('\n') ? '\n' : '') + prefix + evt.line + '\n';
+                await maybeEdit(false);
+              } else if (evt.type === 'image_data') {
+                collectedImages.push(evt.image);
+              } else if (evt.type === 'error') {
+                invokeError = evt.message;
+                metrics.recordInvokeResult('reaction', Date.now() - t0, false, evt.message);
+                params.log?.error({ sessionKey, error: evt.message }, `${logPrefix}:runtime error`);
+                params.log?.warn({ flow: 'reaction', sessionKey, error: evt.message }, 'obs.invoke.error');
+                // eslint-disable-next-line @typescript-eslint/no-floating-promises
+                statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                finalText = mapRuntimeErrorToUserMessage(evt.message);
+                await maybeEdit(true);
+                return;
+              }
             }
+          } finally {
+            clearInterval(keepalive);
           }
           metrics.recordInvokeResult('reaction', Date.now() - t0, true);
           params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
@@ -367,12 +419,20 @@ function createReactionHandler(
             }
           }
 
-          await replyThenSendChunks(msg as any, processedText, collectedImages);
+          await editThenSendChunks(reply!, (msg as any).channel, processedText, collectedImages);
         } catch (err) {
           metrics.increment(handlerErrorMetric);
           params.log?.error({ err, sessionKey }, `${logPrefix}:handler failed`);
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
+          try {
+            if (reply) {
+              await reply.edit({
+                content: mapRuntimeErrorToUserMessage(String(err)),
+                allowedMentions: NO_MENTIONS,
+              });
+            }
+          } catch { /* ignore secondary Discord errors */ }
         }
       });
     } catch (err) {
