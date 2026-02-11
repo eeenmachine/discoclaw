@@ -43,6 +43,27 @@ describe('loadSummary', () => {
     const result = await loadSummary(dir, 'no-summary');
     expect(result).toBeNull();
   });
+
+  it('returns turnsSinceUpdate when present in JSON', async () => {
+    const dir = await makeTmpDir();
+    const data: ConversationSummary = { summary: 'ctx', updatedAt: 1, turnsSinceUpdate: 3 };
+    await fs.writeFile(path.join(dir, 'with-turns.json'), JSON.stringify(data), 'utf8');
+    const result = await loadSummary(dir, 'with-turns');
+    expect(result).toEqual(data);
+    expect(result!.turnsSinceUpdate).toBe(3);
+  });
+
+  it('loads old files without turnsSinceUpdate (backward compat)', async () => {
+    const dir = await makeTmpDir();
+    await fs.writeFile(
+      path.join(dir, 'old-format.json'),
+      JSON.stringify({ summary: 'old', updatedAt: 100 }),
+      'utf8',
+    );
+    const result = await loadSummary(dir, 'old-format');
+    expect(result).toEqual({ summary: 'old', updatedAt: 100 });
+    expect(result!.turnsSinceUpdate).toBeUndefined();
+  });
 });
 
 describe('saveSummary', () => {
@@ -60,6 +81,14 @@ describe('saveSummary', () => {
     await saveSummary(dir, 'overwrite', { summary: 'new', updatedAt: 2 });
     const raw = await fs.readFile(path.join(dir, 'overwrite.json'), 'utf8');
     expect(JSON.parse(raw).summary).toBe('new');
+  });
+
+  it('persists turnsSinceUpdate field', async () => {
+    const dir = await makeTmpDir();
+    await saveSummary(dir, 'turns-persist', { summary: 's', updatedAt: 1, turnsSinceUpdate: 0 });
+    const raw = await fs.readFile(path.join(dir, 'turns-persist.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    expect(parsed.turnsSinceUpdate).toBe(0);
   });
 
   it('creates parent directory if missing', async () => {

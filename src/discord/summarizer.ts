@@ -5,6 +5,7 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 export type ConversationSummary = {
   summary: string;
   updatedAt: number;
+  turnsSinceUpdate?: number;
 };
 
 function safeSessionKey(sessionKey: string): string {

@@ -378,7 +378,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.summaryEnabled) {
             try {
               const existing = await loadSummary(params.summaryDataDir, sessionKey);
-              if (existing) summarySection = existing.summary;
+              if (existing) {
+                summarySection = existing.summary;
+                if (!turnCounters.has(sessionKey)) {
+                  turnCounters.set(sessionKey, existing.turnsSinceUpdate ?? 0);
+                }
+              }
             } catch (err) {
               params.log?.warn({ err, sessionKey }, 'discord:summary load failed');
             }
@@ -761,6 +766,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             saveSummary(params.summaryDataDir, sessionKey, {
               summary: newSummary,
               updatedAt: Date.now(),
+              turnsSinceUpdate: 0,
             }).then(() => {
               if (params.summaryToDurableEnabled) {
                 return applyUserTurnToDurable({
