@@ -62,6 +62,16 @@ describe('parseExtractionResult', () => {
   it('returns empty array response', () => {
     expect(parseExtractionResult('[]')).toEqual([]);
   });
+
+  it('returns empty for non-array JSON object', () => {
+    expect(parseExtractionResult('{"key":"val"}')).toEqual([]);
+  });
+
+  it('extracts first array when trailing brackets exist', () => {
+    const raw = '[{"kind":"fact","text":"ok"}] some text [more stuff]';
+    const items = parseExtractionResult(raw);
+    expect(items).toEqual([{ kind: 'fact', text: 'ok' }]);
+  });
 });
 
 describe('applyUserTurnToDurable', () => {
@@ -152,6 +162,39 @@ describe('applyUserTurnToDurable', () => {
     // No file should be created — nothing to write.
     const store = await loadDurableMemory(dir, '42');
     expect(store).toBeNull();
+  });
+
+  it('concurrent calls for same user serialize correctly', async () => {
+    const dir = await makeTmpDir();
+
+    // Each invocation extracts a different fact.
+    let callCount = 0;
+    const runtime = {
+      invoke: async function* () {
+        const n = ++callCount;
+        yield { type: 'text_final' as const, text: `[{"kind":"fact","text":"Fact ${n}"}]` };
+      },
+    } as any;
+
+    await Promise.all([
+      applyUserTurnToDurable({
+        runtime, userMessageText: 'msg1', userId: '42',
+        durableDataDir: dir, durableMaxItems: 200, model: 'haiku', cwd: '/tmp',
+      }),
+      applyUserTurnToDurable({
+        runtime, userMessageText: 'msg2', userId: '42',
+        durableDataDir: dir, durableMaxItems: 200, model: 'haiku', cwd: '/tmp',
+      }),
+      applyUserTurnToDurable({
+        runtime, userMessageText: 'msg3', userId: '42',
+        durableDataDir: dir, durableMaxItems: 200, model: 'haiku', cwd: '/tmp',
+      }),
+    ]);
+
+    const store = await loadDurableMemory(dir, '42');
+    expect(store).not.toBeNull();
+    // All 3 facts should be stored (no overwrites from races).
+    expect(store!.items).toHaveLength(3);
   });
 
   it('handles runtime error gracefully (no crash)', async () => {

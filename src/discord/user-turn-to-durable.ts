@@ -50,7 +50,7 @@ export async function extractFromUserTurn(
 export function parseExtractionResult(raw: string): ExtractedItem[] {
   try {
     // Try to find the JSON array in the response (may have markdown fences).
-    const match = raw.match(/\[[\s\S]*\]/);
+    const match = raw.match(/\[[\s\S]*?\]/);
     if (!match) return [];
 
     const parsed = JSON.parse(match[0]);

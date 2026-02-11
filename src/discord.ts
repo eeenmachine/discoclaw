@@ -716,7 +716,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           // Stage short-term memory append for fire-and-forget after queue.
-          if (params.shortTermMemoryEnabled && !isDm && msg.guildId) {
+          if (params.shortTermMemoryEnabled && !isDm && msg.guildId && msg.guild) {
             const ch: any = msg.channel as any;
             if (isChannelPublic(ch, msg.guild)) {
               pendingShortTermAppend = {
@@ -776,7 +776,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }),
           )
           .catch((err) => {
-            params.log?.warn({ err, sessionKey }, 'discord:summary generation failed');
+            params.log?.warn({ err, sessionKey }, 'discord:summary/durable-extraction failed');
           });
       }
 

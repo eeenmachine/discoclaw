@@ -220,6 +220,11 @@ describe('isoToSnowflake', () => {
     expect(isoToSnowflake('not-a-date')).toBeNull();
     expect(isoToSnowflake('')).toBeNull();
   });
+
+  it('returns null for pre-epoch dates', () => {
+    expect(isoToSnowflake('2014-01-01')).toBeNull();
+    expect(isoToSnowflake('1970-01-01T00:00:00Z')).toBeNull();
+  });
 });
 
 describe('searchMessages', () => {
@@ -340,6 +345,38 @@ describe('searchMessages', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('No messages matching');
     expect((result as any).summary).toContain('scanned 1');
+  });
+});
+
+describe('searchMessages — empty channel', () => {
+  function makeChannel(pages: Array<Array<{ id: string; content: string; author: { username: string } }>>) {
+    let callIdx = 0;
+    return {
+      id: 'ch1',
+      name: 'general',
+      type: ChannelType.GuildText,
+      messages: {
+        fetch: vi.fn(async () => {
+          const page = pages[callIdx] ?? [];
+          callIdx++;
+          return new Map(page.map((m) => [m.id, m]));
+        }),
+      },
+    };
+  }
+
+  it('returns no-match when channel has zero messages', async () => {
+    const ch = makeChannel([[]]);
+    const ctx = makeCtx({ channels: [ch] });
+
+    const result = await executeGuildAction(
+      { type: 'searchMessages', query: 'anything', channel: '#general' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('No messages matching');
+    expect(ch.messages.fetch).toHaveBeenCalledTimes(1);
   });
 });
 

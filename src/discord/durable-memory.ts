@@ -61,7 +61,7 @@ export async function saveDurableMemory(
   await fs.rename(tmp, filePath);
 }
 
-export function deriveItemId(kind: string, text: string): string {
+export function deriveItemId(kind: DurableItem['kind'], text: string): string {
   const normalized = kind + ':' + text.trim().toLowerCase().replace(/\s+/g, ' ');
   return 'durable-' + crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 8);
 }
@@ -78,6 +78,7 @@ export function addItem(
 
   const existing = store.items.find((item) => item.id === id && item.status === 'active');
   if (existing) {
+    existing.kind = kind;
     existing.text = text;
     existing.source = source;
     existing.updatedAt = now;

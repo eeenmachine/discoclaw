@@ -46,6 +46,7 @@ export function isoToSnowflake(input: string): string | null {
   // Try ISO date parse.
   const ms = Date.parse(trimmed);
   if (isNaN(ms)) return null;
+  if (BigInt(ms) < DISCORD_EPOCH) return null;
 
   const snowflake = (BigInt(ms) - DISCORD_EPOCH) << 22n;
   return snowflake.toString();

@@ -132,6 +132,11 @@ describe('buildExcerptSummary', () => {
     const result = buildExcerptSummary('hi', 'hello', 200);
     expect(result).toBe('User: hi | Bot: hello');
   });
+
+  it('handles empty strings', () => {
+    const result = buildExcerptSummary('', '', 200);
+    expect(result).toBe('User:  | Bot: ');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -160,6 +165,11 @@ describe('selectEntriesForInjection', () => {
       entries: [makeEntry()],
     };
     expect(selectEntriesForInjection(store, 0, 3600_000)).toHaveLength(0);
+  });
+
+  it('returns empty for store with no entries', () => {
+    const store: ShortTermStore = { version: 1, entries: [] };
+    expect(selectEntriesForInjection(store, 10000, 3600_000)).toEqual([]);
   });
 
   it('sorts by recency (newest first)', () => {
