@@ -16,16 +16,22 @@ import type { CronContext } from './discord/actions-crons.js';
 import type { LoggerLike } from './discord/action-types.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
-import { loadDurableMemory, selectItemsForInjection, formatDurableSection } from './discord/durable-memory.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
-import { loadWorkspacePermissions, resolveTools } from './workspace-permissions.js';
 import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { createReactionAddHandler } from './discord/reaction-handler.js';
+import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail } from './discord/output-utils.js';
+import { buildContextFiles, buildDurableMemorySection, loadWorkspacePaFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { editThenSendChunks } from './discord/output-common.js';
+import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
+import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
+import type { HealthConfigSnapshot } from './discord/health-command.js';
+import type { MetricsRegistry } from './observability/metrics.js';
+import { globalMetrics } from './observability/metrics.js';
 
 export type BotParams = {
   token: string;
@@ -80,18 +86,22 @@ export type BotParams = {
   actionFollowupDepth: number;
   reactionHandlerEnabled: boolean;
   reactionMaxAgeMs: number;
+  healthCommandsEnabled?: boolean;
+  healthVerboseAllowlist?: Set<string>;
+  healthConfigSnapshot?: HealthConfigSnapshot;
+  metrics?: MetricsRegistry;
 };
 
-type QueueLike = Pick<KeyedQueue, 'run'>;
+type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 
 const turnCounters = new Map<string, number>();
 
-function groupDirNameFromSessionKey(sessionKey: string): string {
+export function groupDirNameFromSessionKey(sessionKey: string): string {
   // Keep it filesystem-safe and easy to inspect.
   return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
 }
 
-async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
+export async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
   const dir = path.join(groupsDir, groupDirNameFromSessionKey(sessionKey));
   await fs.mkdir(dir, { recursive: true });
   const claudeMd = path.join(dir, 'CLAUDE.md');
@@ -113,151 +123,7 @@ async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<st
   return dir;
 }
 
-export function splitDiscord(text: string, limit = 2000): string[] {
-  // Minimal fence-safe markdown chunking.
-  const normalized = text.replace(/\r\n?/g, '\n');
-  if (normalized.length <= limit) return [normalized];
-
-  const rawLines = normalized.split('\n');
-  const chunks: string[] = [];
-
-  let cur = '';
-  let inFence = false;
-  let fenceHeader = '```';
-
-  const effectiveCurLen = () => {
-    // If we're mid-fence and about to start a new chunk, we'll implicitly emit the fence header.
-    if (cur.length > 0) return cur.length;
-    return inFence ? fenceHeader.length : 0;
-  };
-
-  const remainingRoom = () => {
-    const base = effectiveCurLen();
-    const sep = base > 0 ? 1 : 0; // appendLine will insert a newline when base>0
-    return Math.max(0, limit - base - sep);
-  };
-
-  const ensureFenceOpen = () => {
-    if (cur) return;
-    if (inFence) cur = `${fenceHeader}`;
-  };
-
-  const flush = () => {
-    if (!cur) return;
-    if (inFence && !cur.trimEnd().endsWith('```')) {
-      const close = '\n```';
-      if (cur.length + close.length <= limit) {
-        cur += close;
-      }
-    }
-    chunks.push(cur);
-    cur = '';
-  };
-
-  const appendLine = (line: string) => {
-    ensureFenceOpen();
-    const sep = cur.length > 0 ? '\n' : '';
-    cur += sep + line;
-  };
-
-  for (const line of rawLines) {
-    // If the next line doesn't fit, flush first.
-    const curLen = effectiveCurLen();
-    const nextLen = (curLen ? curLen + 1 : 0) + line.length;
-    if (nextLen > limit && cur) {
-      flush();
-    }
-
-    // If the line is too long for the remaining room in the current chunk, hard-split it.
-    // This matters especially when re-opening a fence header: the header consumes room too.
-    if (line.length > remainingRoom()) {
-      let rest = line;
-      while (rest.length > 0) {
-        const room = Math.max(1, remainingRoom());
-        const take = rest.slice(0, room);
-        appendLine(take);
-        rest = rest.slice(room);
-        if (rest.length > 0) {
-          flush();
-        }
-      }
-    } else {
-      appendLine(line);
-    }
-
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith('```')) {
-      if (!inFence) {
-        inFence = true;
-        fenceHeader = trimmed.trimEnd();
-      } else {
-        inFence = false;
-        fenceHeader = '```';
-      }
-    }
-
-    // If we are in a fence and we're close to the limit, proactively flush
-    // to reduce the chance of an un-closable fence close.
-    if (inFence && cur.length >= limit - 8) {
-      flush();
-      // Next line will reopen.
-    }
-  }
-
-  flush();
-  return chunks.filter((c) => c.trim().length > 0);
-}
-
-export function truncateCodeBlocks(text: string, maxLines = 20): string {
-  // Truncate fenced code blocks that exceed maxLines, keeping first/last lines.
-  return text.replace(/^([ \t]*```[^\n]*\n)([\s\S]*?)(^[ \t]*```[ \t]*$)/gm, (_match, open: string, body: string, close: string) => {
-    const lines = body.split('\n');
-    // The last element after split is usually '' before the closing fence.
-    // Count only non-trivial lines (drop trailing empty from split).
-    const trimmedLines = lines.length > 0 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
-    if (trimmedLines.length <= maxLines) return open + body + close;
-
-    const keepTop = Math.ceil(maxLines / 2);
-    const keepBottom = Math.floor(maxLines / 2);
-    const omitted = trimmedLines.length - keepTop - keepBottom;
-    const top = trimmedLines.slice(0, keepTop);
-    const bottom = trimmedLines.slice(trimmedLines.length - keepBottom);
-    return (
-      open +
-      top.join('\n') + '\n' +
-      `... (${omitted} lines omitted)\n` +
-      bottom.join('\n') + '\n' +
-      close
-    );
-  });
-}
-
-export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 56): string {
-  // Render a fixed-height "tail" view for streaming updates.
-  // Content is bottom-aligned; empty lines above use a zero-width space
-  // so Discord doesn't collapse them.
-  // Lines are truncated to maxWidth to prevent wrapping in Discord code blocks,
-  // which would break the fixed-height visual contract.
-  const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n').filter((l) => l.length > 0);
-  const tail = lines.slice(-maxLines).map((l) =>
-    l.length > maxWidth ? l.slice(0, maxWidth - 1) + '\u2026' : l,
-  );
-  while (tail.length < maxLines) tail.unshift('\u200b');
-  // Avoid breaking the fence if the content contains ``` sequences.
-  const safe = tail.join('\n').replace(/```/g, '``\\`');
-  return `\`\`\`text\n${safe}\n\`\`\``;
-}
-
-export function renderActivityTail(label: string, maxLines = 8, maxWidth = 56): string {
-  // Render a fixed-height block with an activity label on the bottom line.
-  const lines: string[] = [];
-  for (let i = 0; i < maxLines - 1; i++) lines.push('\u200b');
-  const singleLine = label.split('\n')[0] || label;
-  lines.push(singleLine.length > maxWidth ? singleLine.slice(0, maxWidth - 1) + '\u2026' : singleLine);
-  const safe = lines.join('\n').replace(/```/g, '``\\`');
-  return `\`\`\`text\n${safe}\n\`\`\``;
-}
+export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail };
 
 export type StatusRef = { current: StatusPoster | null };
 
@@ -271,22 +137,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       const t = msg.type;
       if (t != null && t !== 0 && t !== 19) return;
 
-      // Heuristic: detect missing Message Content Intent.
-      // If a guild message arrives with empty content but no attachments, stickers,
-      // or embeds, and mentions the bot, the intent is likely not enabled.
-      if (
-        msg.guildId != null &&
-        !msg.content &&
-        (!msg.attachments || msg.attachments.size === 0) &&
-        (!msg.stickers || msg.stickers.size === 0) &&
-        (!msg.embeds || msg.embeds.length === 0) &&
-        msg.mentions?.has(msg.client.user)
-      ) {
-        params.log?.warn(
-          { channelId: msg.channelId, authorId: msg.author.id },
-          'Received empty message content in guild — is Message Content Intent enabled in the Developer Portal?',
-        );
-      }
+      const metrics = params.metrics ?? globalMetrics;
+      metrics.increment('discord.message.received');
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
@@ -309,6 +161,74 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           params.allowChannelIds.has(msg.channelId) ||
           (parentId && params.allowChannelIds.has(parentId));
         if (!allowed) return;
+      }
+
+      // Heuristic: detect missing Message Content Intent and return actionable guidance.
+      // This runs after channel gating so restricted channels remain silent.
+      if (
+        msg.guildId != null &&
+        !msg.content &&
+        (!msg.attachments || msg.attachments.size === 0) &&
+        (!msg.stickers || msg.stickers.size === 0) &&
+        (!msg.embeds || msg.embeds.length === 0) &&
+        msg.mentions?.has(msg.client.user)
+      ) {
+        params.log?.warn(
+          { channelId: msg.channelId, authorId: msg.author.id },
+          'Received empty message content in guild — is Message Content Intent enabled in the Developer Portal?',
+        );
+        await msg.reply({ content: messageContentIntentHint(), allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      const healthMode = (params.healthCommandsEnabled ?? true)
+        ? parseHealthCommand(String(msg.content ?? ''))
+        : null;
+      if (healthMode) {
+        if (healthMode === 'tools') {
+          const liveTools = await resolveEffectiveTools({
+            workspaceCwd: params.workspaceCwd,
+            runtimeTools: params.runtimeTools,
+            log: params.log,
+          });
+          const toolsReport = renderHealthToolsReport({
+            permissionTier: liveTools.permissionTier,
+            effectiveTools: liveTools.effectiveTools,
+            configuredRuntimeTools: params.runtimeTools,
+          });
+          await msg.reply({ content: toolsReport, allowedMentions: NO_MENTIONS });
+          return;
+        }
+
+        const verboseAllowed = !params.healthVerboseAllowlist
+          || params.healthVerboseAllowlist.size === 0
+          || params.healthVerboseAllowlist.has(msg.author.id);
+        const mode = healthMode === 'verbose' && verboseAllowed ? 'verbose' : 'basic';
+        const healthConfig: HealthConfigSnapshot = params.healthConfigSnapshot ?? {
+          runtimeModel: params.runtimeModel,
+          runtimeTimeoutMs: params.runtimeTimeoutMs,
+          runtimeTools: params.runtimeTools,
+          useRuntimeSessions: params.useRuntimeSessions,
+          toolAwareStreaming: Boolean(params.toolAwareStreaming),
+          maxConcurrentInvocations: 0,
+          discordActionsEnabled: params.discordActionsEnabled,
+          summaryEnabled: params.summaryEnabled,
+          durableMemoryEnabled: params.durableMemoryEnabled,
+          messageHistoryBudget: params.messageHistoryBudget,
+          reactionHandlerEnabled: params.reactionHandlerEnabled,
+          cronEnabled: Boolean(params.cronCtx),
+          beadsEnabled: Boolean(params.beadCtx),
+          requireChannelContext: params.requireChannelContext,
+          autoIndexChannelContext: params.autoIndexChannelContext,
+        };
+        const report = renderHealthReport({
+          metrics,
+          queueDepth: queue.size?.() ?? 0,
+          config: healthConfig,
+          mode,
+        });
+        await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
       }
 
       const isThread = typeof (msg.channel as any)?.isThread === 'function' ? (msg.channel as any).isThread() : false;
@@ -396,26 +316,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           });
 
           if (params.requireChannelContext && !isDm && !channelCtx.contextPath) {
-            await reply.edit('Configuration error: missing required channel context file for this channel ID.');
+            await reply.edit({
+              content: mapRuntimeErrorToUserMessage('Configuration error: missing required channel context file for this channel ID.'),
+              allowedMentions: NO_MENTIONS,
+            });
             return;
           }
 
-          // Keep prompt small: link to the channel context file and instruct the runtime to read it.
-          // Workspace PA files — identity, personality, user profile (listed first so Claude reads them first).
-          const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
-          const bootstrapPath = path.join(params.workspaceCwd, 'BOOTSTRAP.md');
-          const paFiles: string[] = [];
-          try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* no bootstrap */ }
-          for (const f of paFileNames) {
-            const p = path.join(params.workspaceCwd, f);
-            try { await fs.access(p); paFiles.push(p); } catch { /* skip missing */ }
-          }
-
-          const contextFiles: string[] = [...paFiles];
-          if (params.discordChannelContext) {
-            contextFiles.push(...params.discordChannelContext.baseFiles);
-          }
-          if (channelCtx.contextPath) contextFiles.push(channelCtx.contextPath);
+          const paFiles = await loadWorkspacePaFiles(params.workspaceCwd);
+          const contextFiles = buildContextFiles(paFiles, params.discordChannelContext, channelCtx.contextPath);
 
           let historySection = '';
           if (params.messageHistoryBudget > 0) {
@@ -440,18 +349,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          let durableSection = '';
-          if (params.durableMemoryEnabled) {
-            try {
-              const store = await loadDurableMemory(params.durableDataDir, msg.author.id);
-              if (store) {
-                const items = selectItemsForInjection(store, params.durableInjectMaxChars);
-                if (items.length > 0) durableSection = formatDurableSection(items);
-              }
-            } catch (err) {
-              params.log?.warn({ err, userId: msg.author.id }, 'discord:durable memory load failed');
-            }
-          }
+          const durableSection = await buildDurableMemorySection({
+            enabled: params.durableMemoryEnabled,
+            durableDataDir: params.durableDataDir,
+            userId: msg.author.id,
+            durableInjectMaxChars: params.durableInjectMaxChars,
+            log: params.log,
+          });
 
           let prompt =
             `Context files (read with Read tool before responding, in order):\n` +
@@ -476,10 +380,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);
           if (params.discordChannelContext) addDirs.push(params.discordChannelContext.contentDir);
 
-          const permissions = await loadWorkspacePermissions(params.workspaceCwd, params.log);
-          const effectiveTools = resolveTools(permissions, params.runtimeTools);
-          if (permissions?.note) {
-            prompt += `\n\n---\nPermission note: ${permissions.note}\n`;
+          const tools = await resolveEffectiveTools({
+            workspaceCwd: params.workspaceCwd,
+            runtimeTools: params.runtimeTools,
+            log: params.log,
+          });
+          const effectiveTools = tools.effectiveTools;
+          if (tools.permissionNote) {
+            prompt += `\n\n---\nPermission note: ${tools.permissionNote}\n`;
           }
 
           params.log?.info(
@@ -493,7 +401,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               channelId: channelCtx.channelId,
               channelName: channelCtx.channelName,
               hasChannelContext: Boolean(channelCtx.contextPath),
-              permissionTier: permissions?.tier ?? 'env',
+              permissionTier: tools.permissionTier,
             },
             'invoke:start',
           );
@@ -511,6 +419,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             let deltaText = '';
             let activityLabel = '';
             const t0 = Date.now();
+            metrics.recordInvokeStart('message');
+            params.log?.info({ flow: 'message', sessionKey, followUpDepth }, 'obs.invoke.start');
+            let invokeHadError = false;
+            let invokeErrorMessage = '';
             let lastEditAt = 0;
             const minEditIntervalMs = 1250;
 
@@ -581,11 +493,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     evt.type === 'tool_start' || evt.type === 'tool_end') {
                   taq.handleEvent(evt);
                 } else if (evt.type === 'error') {
+                  invokeHadError = true;
+                  invokeErrorMessage = evt.message;
                   taq.handleEvent(evt);
-                  finalText = `Error: ${evt.message}`;
+                  finalText = mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                  params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
                 } else if (evt.type === 'log_line') {
                   // Bypass queue for log lines.
                   const prefix = evt.stream === 'stderr' ? '[stderr] ' : '[stdout] ';
@@ -598,10 +513,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   finalText = evt.text;
                   await maybeEdit(true);
                 } else if (evt.type === 'error') {
-                  finalText = `Error: ${evt.message}`;
+                  invokeHadError = true;
+                  invokeErrorMessage = evt.message;
+                  finalText = mapRuntimeErrorToUserMessage(evt.message);
                   await maybeEdit(true);
                   // eslint-disable-next-line @typescript-eslint/no-floating-promises
                   statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+                  params.log?.warn({ flow: 'message', sessionKey, error: evt.message }, 'obs.invoke.error');
                 } else if (evt.type === 'text_delta') {
                   deltaText += evt.text;
                   await maybeEdit(false);
@@ -613,6 +531,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             }
             taq?.dispose();
+            metrics.recordInvokeResult('message', Date.now() - t0, !invokeHadError, invokeErrorMessage);
+            params.log?.info(
+              { flow: 'message', sessionKey, followUpDepth, ms: Date.now() - t0, ok: !invokeHadError },
+              'obs.invoke.end',
+            );
             if (followUpDepth > 0) {
               params.log?.info({ sessionKey, followUpDepth, ms: Date.now() - t0 }, 'followup:end');
             } else {
@@ -634,6 +557,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   messageId: msg.id,
                 };
                 actionResults = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
+                for (const result of actionResults) {
+                  metrics.recordActionResult(result.ok);
+                  params.log?.info(
+                    { flow: 'message', sessionKey, ok: result.ok },
+                    'obs.action.result',
+                  );
+                }
                 const resultLines = actionResults.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
                 processedText = parsed.cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
                 if (statusRef?.current) {
@@ -661,13 +591,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             }
 
-            // Post to Discord.
-            const outText = truncateCodeBlocks(processedText);
-            const chunks = splitDiscord(outText);
-            await reply.edit({ content: chunks[0] ?? '(no output)', allowedMentions: NO_MENTIONS });
-            for (const extra of chunks.slice(1)) {
-              await msg.channel.send({ content: extra, allowedMentions: NO_MENTIONS });
-            }
+            await editThenSendChunks(reply, msg.channel, processedText);
 
             // -- auto-follow-up check --
             if (followUpDepth >= params.actionFollowupDepth) break;
@@ -707,11 +631,17 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
         } catch (err) {
+          metrics.increment('discord.handler.error');
           params.log?.error({ err, sessionKey }, 'discord:handler failed');
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
           try {
-            if (reply) await reply.edit({ content: `Error: ${String(err)}`, allowedMentions: NO_MENTIONS });
+            if (reply) {
+              await reply.edit({
+                content: mapRuntimeErrorToUserMessage(String(err)),
+                allowedMentions: NO_MENTIONS,
+              });
+            }
           } catch {
             // Ignore secondary errors writing to Discord.
           }
@@ -742,6 +672,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           });
       }
     } catch (err) {
+      const metrics = params.metrics ?? globalMetrics;
+      metrics.increment('discord.message.handler_wrapper_error');
       params.log?.error({ err }, 'discord:messageCreate failed');
     }
   };

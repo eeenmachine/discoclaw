@@ -7,7 +7,6 @@ import fs from 'node:fs/promises';
 import { createClaudeCliRuntime, killActiveSubprocesses } from './runtime/claude-code-cli.js';
 import { withConcurrencyLimit } from './runtime/concurrency-limit.js';
 import { SessionManager } from './sessions.js';
-import { parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { loadDiscordChannelContext } from './discord/channel-context.js';
 import { startDiscordBot } from './discord.js';
 import type { StatusPoster } from './discord/status-channel.js';
@@ -24,39 +23,39 @@ import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
 import { ensureForumTags } from './discord/system-bootstrap.js';
+import { parseConfig } from './config.js';
+import { globalMetrics } from './observability/metrics.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const token = process.env.DISCORD_TOKEN ?? '';
-if (!token) {
-  log.error('Missing DISCORD_TOKEN');
+let parsedConfig;
+try {
+  parsedConfig = parseConfig(process.env);
+} catch (err) {
+  log.error({ err }, 'Invalid configuration');
   process.exit(1);
 }
-
-const allowUserIds = parseAllowUserIds(process.env.DISCORD_ALLOW_USER_IDS);
-if (allowUserIds.size === 0) {
-  log.warn('DISCORD_ALLOW_USER_IDS is empty: bot will respond to nobody (fail closed)');
+for (const warning of parsedConfig.warnings) {
+  log.warn(warning);
 }
-
-const allowChannelIdsRaw = process.env.DISCORD_CHANNEL_IDS;
-const restrictChannelIds = (allowChannelIdsRaw ?? '').trim().length > 0;
-const allowChannelIds = parseAllowChannelIds(allowChannelIdsRaw);
-if (restrictChannelIds && allowChannelIds.size === 0) {
-  log.warn('DISCORD_CHANNEL_IDS was set but no valid IDs were parsed: bot will respond to no guild channels (fail closed)');
+for (const info of parsedConfig.infos) {
+  log.info(info);
 }
+const cfg = parsedConfig.config;
 
-const runtimeModel = (process.env.RUNTIME_MODEL ?? 'opus').trim() || 'opus';
-const runtimeTools = String(process.env.RUNTIME_TOOLS ?? 'Bash,Read,Edit,WebSearch,WebFetch')
-  .split(/[,\s]+/g)
-  .map((t) => t.trim())
-  .filter(Boolean);
-const runtimeTimeoutMsRaw = (process.env.RUNTIME_TIMEOUT_MS ?? '').trim();
-const runtimeTimeoutMs = runtimeTimeoutMsRaw ? Math.max(1, Number(runtimeTimeoutMsRaw)) : 10 * 60_000;
+const token = cfg.token;
+const allowUserIds = cfg.allowUserIds;
+const allowChannelIds = cfg.allowChannelIds;
+const restrictChannelIds = cfg.restrictChannelIds;
 
-const dataDir = process.env.DISCOCLAW_DATA_DIR;
+const runtimeModel = cfg.runtimeModel;
+const runtimeTools = cfg.runtimeTools;
+const runtimeTimeoutMs = cfg.runtimeTimeoutMs;
+
+const dataDir = cfg.dataDir;
 
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
@@ -83,7 +82,7 @@ const shutdown = async () => {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
-const contentDir = (process.env.DISCOCLAW_CONTENT_DIR ?? '').trim() || (dataDir
+const contentDir = cfg.contentDirOverride || (dataDir
   ? path.join(dataDir, 'content')
   : path.join(__dirname, '..', 'content'));
 
@@ -97,44 +96,46 @@ try {
   discordChannelContext = undefined;
 }
 
-const requireChannelContext = (process.env.DISCORD_REQUIRE_CHANNEL_CONTEXT ?? '1') === '1';
-const autoIndexChannelContext = (process.env.DISCORD_AUTO_INDEX_CHANNEL_CONTEXT ?? '1') === '1';
-const autoJoinThreads = (process.env.DISCORD_AUTO_JOIN_THREADS ?? '0') === '1';
-const useRuntimeSessions = (process.env.DISCOCLAW_RUNTIME_SESSIONS ?? '1') === '1';
-const discordActionsEnabled = (process.env.DISCOCLAW_DISCORD_ACTIONS ?? '0') === '1';
-const discordActionsChannels = (process.env.DISCOCLAW_DISCORD_ACTIONS_CHANNELS ?? '1') === '1';
-const discordActionsMessaging = (process.env.DISCOCLAW_DISCORD_ACTIONS_MESSAGING ?? '0') === '1';
-const discordActionsGuild = (process.env.DISCOCLAW_DISCORD_ACTIONS_GUILD ?? '0') === '1';
-const discordActionsModeration = (process.env.DISCOCLAW_DISCORD_ACTIONS_MODERATION ?? '0') === '1';
-const discordActionsPolls = (process.env.DISCOCLAW_DISCORD_ACTIONS_POLLS ?? '0') === '1';
-const messageHistoryBudget = Math.max(0, Number(process.env.DISCOCLAW_MESSAGE_HISTORY_BUDGET ?? '3000'));
-const summaryEnabled = (process.env.DISCOCLAW_SUMMARY_ENABLED ?? '1') === '1';
-const summaryModel = (process.env.DISCOCLAW_SUMMARY_MODEL ?? 'haiku').trim() || 'haiku';
-const summaryMaxChars = Math.max(0, Number(process.env.DISCOCLAW_SUMMARY_MAX_CHARS ?? '2000'));
-const summaryEveryNTurns = Math.max(1, Number(process.env.DISCOCLAW_SUMMARY_EVERY_N_TURNS ?? '5'));
-const summaryDataDir = (process.env.DISCOCLAW_SUMMARY_DATA_DIR ?? '').trim()
+const requireChannelContext = cfg.requireChannelContext;
+const autoIndexChannelContext = cfg.autoIndexChannelContext;
+const autoJoinThreads = cfg.autoJoinThreads;
+const useRuntimeSessions = cfg.useRuntimeSessions;
+const discordActionsEnabled = cfg.discordActionsEnabled;
+const discordActionsChannels = cfg.discordActionsChannels;
+const discordActionsMessaging = cfg.discordActionsMessaging;
+const discordActionsGuild = cfg.discordActionsGuild;
+const discordActionsModeration = cfg.discordActionsModeration;
+const discordActionsPolls = cfg.discordActionsPolls;
+const messageHistoryBudget = cfg.messageHistoryBudget;
+const summaryEnabled = cfg.summaryEnabled;
+const summaryModel = cfg.summaryModel;
+const summaryMaxChars = cfg.summaryMaxChars;
+const summaryEveryNTurns = cfg.summaryEveryNTurns;
+const summaryDataDir = cfg.summaryDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'rolling') : path.join(__dirname, '..', 'data', 'memory', 'rolling'));
-const durableMemoryEnabled = (process.env.DISCOCLAW_DURABLE_MEMORY_ENABLED ?? '1') === '1';
-const durableDataDir = (process.env.DISCOCLAW_DURABLE_DATA_DIR ?? '').trim()
+const durableMemoryEnabled = cfg.durableMemoryEnabled;
+const durableDataDir = cfg.durableDataDirOverride
   || (dataDir ? path.join(dataDir, 'memory', 'durable') : path.join(__dirname, '..', 'data', 'memory', 'durable'));
-const durableInjectMaxChars = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_INJECT_MAX_CHARS ?? '2000'));
-const durableMaxItems = Math.max(1, Number(process.env.DISCOCLAW_DURABLE_MAX_ITEMS ?? '200'));
-const memoryCommandsEnabled = (process.env.DISCOCLAW_MEMORY_COMMANDS_ENABLED ?? '1') === '1';
-const actionFollowupDepth = Math.max(0, Number(process.env.DISCOCLAW_ACTION_FOLLOWUP_DEPTH ?? '3'));
-const reactionHandlerEnabled = (process.env.DISCOCLAW_REACTION_HANDLER ?? '0') === '1';
-const reactionMaxAgeHours = Math.max(0, Number(process.env.DISCOCLAW_REACTION_MAX_AGE_HOURS ?? '24'));
+const durableInjectMaxChars = cfg.durableInjectMaxChars;
+const durableMaxItems = cfg.durableMaxItems;
+const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
+const actionFollowupDepth = cfg.actionFollowupDepth;
+const reactionHandlerEnabled = cfg.reactionHandlerEnabled;
+const reactionMaxAgeHours = cfg.reactionMaxAgeHours;
 const reactionMaxAgeMs = reactionMaxAgeHours * 60 * 60 * 1000;
-const statusChannel = (process.env.DISCOCLAW_STATUS_CHANNEL ?? '').trim() || undefined;
-const guildId = (process.env.DISCORD_GUILD_ID ?? '').trim() || undefined;
-const cronEnabled = (process.env.DISCOCLAW_CRON_ENABLED ?? '0') === '1';
-const cronForum = (process.env.DISCOCLAW_CRON_FORUM ?? '').trim() || undefined;
-const cronModel = (process.env.DISCOCLAW_CRON_MODEL ?? 'haiku').trim() || 'haiku';
-const discordActionsCrons = (process.env.DISCOCLAW_DISCORD_ACTIONS_CRONS ?? '0') === '1';
-const cronAutoTag = (process.env.DISCOCLAW_CRON_AUTO_TAG ?? '0') === '1';
-const cronAutoTagModel = (process.env.DISCOCLAW_CRON_AUTO_TAG_MODEL ?? 'haiku').trim() || 'haiku';
-const cronStatsDir = (process.env.DISCOCLAW_CRON_STATS_DIR ?? '').trim()
+const healthCommandsEnabled = cfg.healthCommandsEnabled;
+const healthVerboseAllowlist = cfg.healthVerboseAllowlist;
+const statusChannel = cfg.statusChannel;
+const guildId = cfg.guildId;
+const cronEnabled = cfg.cronEnabled;
+const cronForum = cfg.cronForum;
+const cronModel = cfg.cronModel;
+const discordActionsCrons = cfg.discordActionsCrons;
+const cronAutoTag = cfg.cronAutoTag;
+const cronAutoTagModel = cfg.cronAutoTagModel;
+const cronStatsDir = cfg.cronStatsDirOverride
   || (dataDir ? path.join(dataDir, 'cron') : path.join(__dirname, '..', 'data', 'cron'));
-const cronTagMapPath = (process.env.DISCOCLAW_CRON_TAG_MAP ?? '').trim()
+const cronTagMapPath = cfg.cronTagMapPathOverride
   || path.join(cronStatsDir, 'tag-map.json');
 const cronTagMapSeedPath = path.join(__dirname, '..', 'scripts', 'cron', 'cron-tag-map.json');
 
@@ -146,43 +147,40 @@ if (requireChannelContext && !discordChannelContext) {
 const defaultWorkspaceCwd = dataDir
   ? path.join(dataDir, 'workspace')
   : path.join(__dirname, '..', 'workspace');
-// Treat empty env vars as "unset" so `.env` placeholders don't override defaults.
-const workspaceCwd = (process.env.WORKSPACE_CWD ?? '').trim() || defaultWorkspaceCwd;
-const groupsDir = (process.env.GROUPS_DIR ?? '').trim() || path.join(__dirname, '..', 'groups');
-const useGroupDirCwd = (process.env.USE_GROUP_DIR_CWD ?? '0') === '1';
+const workspaceCwd = cfg.workspaceCwdOverride || defaultWorkspaceCwd;
+const groupsDir = cfg.groupsDirOverride || path.join(__dirname, '..', 'groups');
+const useGroupDirCwd = cfg.useGroupDirCwd;
 
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
 
 // --- Beads subsystem ---
-const beadsEnabled = (process.env.DISCOCLAW_BEADS_ENABLED ?? '0') === '1';
-const beadsCwd = (process.env.DISCOCLAW_BEADS_CWD ?? '').trim() || workspaceCwd;
-const beadsForum = (process.env.DISCOCLAW_BEADS_FORUM ?? '').trim() || '';
-const beadsTagMapPath = (process.env.DISCOCLAW_BEADS_TAG_MAP ?? '').trim()
+const beadsEnabled = cfg.beadsEnabled;
+const beadsCwd = cfg.beadsCwdOverride || workspaceCwd;
+const beadsForum = cfg.beadsForum || '';
+const beadsTagMapPath = cfg.beadsTagMapPathOverride
   || path.join(__dirname, '..', 'scripts', 'beads', 'bead-hooks', 'tag-map.json');
-const beadsMentionUser = (process.env.DISCOCLAW_BEADS_MENTION_USER ?? '').trim() || undefined;
-const beadsAutoTag = (process.env.DISCOCLAW_BEADS_AUTO_TAG ?? '1') === '1';
-const beadsAutoTagModel = (process.env.DISCOCLAW_BEADS_AUTO_TAG_MODEL ?? 'haiku').trim() || 'haiku';
-const discordActionsBeads = (process.env.DISCOCLAW_DISCORD_ACTIONS_BEADS ?? '0') === '1';
+const beadsMentionUser = cfg.beadsMentionUser;
+const beadsAutoTag = cfg.beadsAutoTag;
+const beadsAutoTagModel = cfg.beadsAutoTagModel;
+const discordActionsBeads = cfg.discordActionsBeads;
 
-const claudeBin = process.env.CLAUDE_BIN ?? 'claude';
-const dangerouslySkipPermissions = (process.env.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS ?? '0') === '1';
-const outputFormat = (process.env.CLAUDE_OUTPUT_FORMAT ?? 'text') === 'stream-json'
-  ? 'stream-json'
-  : 'text';
-const echoStdio = (process.env.CLAUDE_ECHO_STDIO ?? '0') === '1';
-const claudeDebugFile = (process.env.CLAUDE_DEBUG_FILE ?? '').trim() || null;
-const strictMcpConfig = (process.env.CLAUDE_STRICT_MCP_CONFIG ?? '1') === '1';
-const sessionScanning = (process.env.DISCOCLAW_SESSION_SCANNING ?? '0') === '1';
-const toolAwareStreaming = (process.env.DISCOCLAW_TOOL_AWARE_STREAMING ?? '0') === '1';
-const multiTurn = (process.env.DISCOCLAW_MULTI_TURN ?? '1') === '1';
-const multiTurnHangTimeoutMs = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS ?? '60000'));
-const multiTurnIdleTimeoutMs = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_IDLE_TIMEOUT_MS ?? '300000'));
-const multiTurnMaxProcesses = Math.max(1, Number(process.env.DISCOCLAW_MULTI_TURN_MAX_PROCESSES ?? '5'));
-const maxConcurrentInvocations = Math.max(0, Number(process.env.DISCOCLAW_MAX_CONCURRENT_INVOCATIONS ?? '0'));
+const claudeBin = cfg.claudeBin;
+const dangerouslySkipPermissions = cfg.dangerouslySkipPermissions;
+const outputFormat = cfg.outputFormat;
+const echoStdio = cfg.echoStdio;
+const claudeDebugFile = cfg.claudeDebugFile ?? null;
+const strictMcpConfig = cfg.strictMcpConfig;
+const sessionScanning = cfg.sessionScanning;
+const toolAwareStreaming = cfg.toolAwareStreaming;
+const multiTurn = cfg.multiTurn;
+const multiTurnHangTimeoutMs = cfg.multiTurnHangTimeoutMs;
+const multiTurnIdleTimeoutMs = cfg.multiTurnIdleTimeoutMs;
+const multiTurnMaxProcesses = cfg.multiTurnMaxProcesses;
+const maxConcurrentInvocations = cfg.maxConcurrentInvocations;
 
 // Debug: surface common "works in terminal but not in systemd" issues without logging secrets.
-if ((process.env.DISCOCLAW_DEBUG_RUNTIME ?? '0') === '1') {
+if (cfg.debugRuntime) {
   log.info(
     {
       env: {
@@ -288,6 +286,26 @@ const botParams = {
   actionFollowupDepth,
   reactionHandlerEnabled,
   reactionMaxAgeMs,
+  healthCommandsEnabled,
+  healthVerboseAllowlist,
+  healthConfigSnapshot: {
+    runtimeModel,
+    runtimeTimeoutMs,
+    runtimeTools,
+    useRuntimeSessions,
+    toolAwareStreaming,
+    maxConcurrentInvocations,
+    discordActionsEnabled,
+    summaryEnabled,
+    durableMemoryEnabled,
+    messageHistoryBudget,
+    reactionHandlerEnabled,
+    cronEnabled,
+    beadsEnabled,
+    requireChannelContext,
+    autoIndexChannelContext,
+  },
+  metrics: globalMetrics,
 };
 
 const { client, status, system } = await startDiscordBot(botParams);
@@ -425,6 +443,10 @@ if (cronEnabled && effectiveCronForum) {
   );
 } else if (cronEnabled && !effectiveCronForum) {
   log.warn('DISCOCLAW_CRON_ENABLED=1 but no cron forum was resolved (set DISCORD_GUILD_ID or DISCOCLAW_CRON_FORUM); cron subsystem disabled');
+}
+
+if (reactionHandlerEnabled) {
+  log.info({ reactionMaxAgeHours }, 'reaction:handler enabled');
 }
 
 log.info('Discord bot started');

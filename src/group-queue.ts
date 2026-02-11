@@ -1,6 +1,10 @@
 export class KeyedQueue {
   private tails = new Map<string, Promise<void>>();
 
+  size(): number {
+    return this.tails.size;
+  }
+
   async run<T>(key: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.tails.get(key) ?? Promise.resolve();
 
@@ -25,4 +29,3 @@ export class KeyedQueue {
     }
   }
 }
-

@@ -1,45 +1,18 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js';
 import type { BotParams, StatusRef } from '../discord.js';
-import { splitDiscord, truncateCodeBlocks } from '../discord.js';
+import { ensureGroupDir } from '../discord.js';
 import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './actions.js';
 import type { ActionCategoryFlags } from './actions.js';
-import { NO_MENTIONS } from './allowed-mentions.js';
-import { loadDurableMemory, selectItemsForInjection, formatDurableSection } from './durable-memory.js';
-import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
-import type { LoggerLike } from './action-types.js';
+import { buildContextFiles, buildDurableMemorySection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
+import { replyThenSendChunks } from './output-common.js';
+import { mapRuntimeErrorToUserMessage } from './user-errors.js';
+import { globalMetrics } from '../observability/metrics.js';
 
-type QueueLike = Pick<KeyedQueue, 'run'>;
-
-function groupDirNameFromSessionKey(sessionKey: string): string {
-  return sessionKey.replace(/[^a-zA-Z0-9:_-]+/g, '-');
-}
-
-async function ensureGroupDir(groupsDir: string, sessionKey: string): Promise<string> {
-  const dir = path.join(groupsDir, groupDirNameFromSessionKey(sessionKey));
-  await fs.mkdir(dir, { recursive: true });
-  const claudeMd = path.join(dir, 'CLAUDE.md');
-  try {
-    await fs.stat(claudeMd);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw err;
-    const body =
-      `# Discoclaw Group\n\n` +
-      `Session key: \`${sessionKey}\`\n\n` +
-      `This directory scopes conversation instructions for this Discord context.\n\n` +
-      `Notes:\n` +
-      `- The main workspace is mounted separately (see Discoclaw service env).\n` +
-      `- Keep instructions short and specific; prefer referencing files in the workspace.\n`;
-    await fs.writeFile(claudeMd, body, 'utf8');
-  }
-  return dir;
-}
+type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 
 export function createReactionAddHandler(
   params: Omit<BotParams, 'token'>,
@@ -48,6 +21,9 @@ export function createReactionAddHandler(
 ): (reaction: MessageReaction | PartialMessageReaction, user: User | PartialUser) => Promise<void> {
   return async (reaction, user) => {
     try {
+      const metrics = params.metrics ?? globalMetrics;
+      metrics.increment('discord.reaction.received');
+
       // 1. Self-reaction guard — prevent infinite loops from bot's own reactions.
       if (user.id === reaction.message.client.user?.id) return;
 
@@ -78,10 +54,14 @@ export function createReactionAddHandler(
       // 5. Allowlist check.
       if (!isAllowlisted(params.allowUserIds, user.id)) return;
 
+      // Resolve channel/thread info once, used by guards and the queue callback.
+      const ch: any = reaction.message.channel as any;
+      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
+      const threadId = isThread ? String(ch.id ?? '') : null;
+      const threadParentId = isThread ? String(ch.parentId ?? '') : null;
+
       // 6. Channel restriction.
       if (params.allowChannelIds) {
-        const ch: any = reaction.message.channel as any;
-        const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
         const parentId = isThread ? String(ch.parentId ?? '') : '';
         const allowed =
           params.allowChannelIds.has(reaction.message.channelId) ||
@@ -90,10 +70,6 @@ export function createReactionAddHandler(
       }
 
       // 7. Session key.
-      const ch: any = reaction.message.channel as any;
-      const isThread = typeof ch?.isThread === 'function' ? ch.isThread() : false;
-      const threadId = isThread ? String(ch.id ?? '') : null;
-      const threadParentId = isThread ? String(ch.parentId ?? '') : null;
       const sessionKey = discordSessionKey({
         channelId: reaction.message.channelId,
         authorId: user.id,
@@ -106,15 +82,14 @@ export function createReactionAddHandler(
         try {
           // Join thread if needed.
           if (params.autoJoinThreads && isThread) {
-            const th: any = reaction.message.channel as any;
-            const joinable = typeof th?.joinable === 'boolean' ? th.joinable : true;
-            const joined = typeof th?.joined === 'boolean' ? th.joined : false;
-            if (joinable && !joined && typeof th?.join === 'function') {
+            const joinable = typeof ch?.joinable === 'boolean' ? ch.joinable : true;
+            const joined = typeof ch?.joined === 'boolean' ? ch.joined : false;
+            if (joinable && !joined && typeof ch?.join === 'function') {
               try {
-                await th.join();
-                params.log?.info({ threadId: String(th.id ?? ''), parentId: String(th.parentId ?? '') }, 'reaction:thread joined');
+                await ch.join();
+                params.log?.info({ threadId: String(ch.id ?? ''), parentId: String(ch.parentId ?? '') }, 'reaction:thread joined');
               } catch (err) {
-                params.log?.warn({ err, threadId: String(th?.id ?? '') }, 'reaction:thread failed to join');
+                params.log?.warn({ err, threadId: String(ch?.id ?? '') }, 'reaction:thread failed to join');
               }
             }
           }
@@ -126,7 +101,7 @@ export function createReactionAddHandler(
           // Auto-index channel context.
           if (params.discordChannelContext && params.autoIndexChannelContext) {
             const id = (threadParentId && threadParentId.trim()) ? threadParentId : reaction.message.channelId;
-            const chName = String((ch as any)?.name ?? (ch as any)?.parent?.name ?? '').trim();
+            const chName = String(ch?.name ?? ch?.parent?.name ?? '').trim();
             try {
               await ensureIndexedDiscordChannelContext({
                 ctx: params.discordChannelContext,
@@ -151,35 +126,15 @@ export function createReactionAddHandler(
             return;
           }
 
-          // Build context file list.
-          const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
-          const bootstrapPath = path.join(params.workspaceCwd, 'BOOTSTRAP.md');
-          const paFiles: string[] = [];
-          try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* no bootstrap */ }
-          for (const f of paFileNames) {
-            const p = path.join(params.workspaceCwd, f);
-            try { await fs.access(p); paFiles.push(p); } catch { /* skip missing */ }
-          }
-
-          const contextFiles: string[] = [...paFiles];
-          if (params.discordChannelContext) {
-            contextFiles.push(...params.discordChannelContext.baseFiles);
-          }
-          if (channelCtx.contextPath) contextFiles.push(channelCtx.contextPath);
-
-          // Load durable memory.
-          let durableSection = '';
-          if (params.durableMemoryEnabled) {
-            try {
-              const store = await loadDurableMemory(params.durableDataDir, user.id);
-              if (store) {
-                const items = selectItemsForInjection(store, params.durableInjectMaxChars);
-                if (items.length > 0) durableSection = formatDurableSection(items);
-              }
-            } catch (err) {
-              params.log?.warn({ err, userId: user.id }, 'reaction:durable memory load failed');
-            }
-          }
+          const paFiles = await loadWorkspacePaFiles(params.workspaceCwd);
+          const contextFiles = buildContextFiles(paFiles, params.discordChannelContext, channelCtx.contextPath);
+          const durableSection = await buildDurableMemorySection({
+            enabled: params.durableMemoryEnabled,
+            durableDataDir: params.durableDataDir,
+            userId: user.id,
+            durableInjectMaxChars: params.durableInjectMaxChars,
+            log: params.log,
+          });
 
           // Build prompt.
           const emoji = reaction.emoji.name ?? '(unknown)';
@@ -187,7 +142,7 @@ export function createReactionAddHandler(
           const messageContent = String(msg.content ?? '').slice(0, 1500);
           const messageAuthor = msg.author?.displayName || msg.author?.username || 'Unknown';
           const messageAuthorId = msg.author?.id ?? 'unknown';
-          const reactingUser = (user as any).displayName || (user as any).username || 'Unknown';
+          const reactingUser = user.displayName || user.username || 'Unknown';
 
           // Channel label.
           let channelLabel: string;
@@ -247,10 +202,14 @@ export function createReactionAddHandler(
           if (params.useGroupDirCwd) addDirs.push(params.workspaceCwd);
           if (params.discordChannelContext) addDirs.push(params.discordChannelContext.contentDir);
 
-          const permissions = await loadWorkspacePermissions(params.workspaceCwd, params.log);
-          const effectiveTools = resolveTools(permissions, params.runtimeTools);
-          if (permissions?.note) {
-            prompt += `\n\n---\nPermission note: ${permissions.note}\n`;
+          const tools = await resolveEffectiveTools({
+            workspaceCwd: params.workspaceCwd,
+            runtimeTools: params.runtimeTools,
+            log: params.log,
+          });
+          const effectiveTools = tools.effectiveTools;
+          if (tools.permissionNote) {
+            prompt += `\n\n---\nPermission note: ${tools.permissionNote}\n`;
           }
 
           // Session continuity.
@@ -271,7 +230,7 @@ export function createReactionAddHandler(
               channelId: channelCtx.channelId,
               channelName: channelCtx.channelName,
               hasChannelContext: Boolean(channelCtx.contextPath),
-              permissionTier: permissions?.tier ?? 'env',
+              permissionTier: tools.permissionTier,
             },
             'reaction:invoke:start',
           );
@@ -279,6 +238,10 @@ export function createReactionAddHandler(
           // Non-streaming collect pattern (like cron executor).
           let finalText = '';
           let deltaText = '';
+          const t0 = Date.now();
+          metrics.recordInvokeStart('reaction');
+          params.log?.info({ flow: 'reaction', sessionKey }, 'obs.invoke.start');
+          let invokeError: string | null = null;
           for await (const evt of params.runtime.invoke({
             prompt,
             model: params.runtimeModel,
@@ -294,16 +257,22 @@ export function createReactionAddHandler(
             } else if (evt.type === 'text_delta') {
               deltaText += evt.text;
             } else if (evt.type === 'error') {
+              invokeError = evt.message;
+              metrics.recordInvokeResult('reaction', Date.now() - t0, false, evt.message);
               params.log?.error({ sessionKey, error: evt.message }, 'reaction:runtime error');
+              params.log?.warn({ flow: 'reaction', sessionKey, error: evt.message }, 'obs.invoke.error');
               // eslint-disable-next-line @typescript-eslint/no-floating-promises
               statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
+              await replyThenSendChunks(reaction.message as any, mapRuntimeErrorToUserMessage(evt.message));
               return;
             }
           }
+          metrics.recordInvokeResult('reaction', Date.now() - t0, true);
+          params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
 
           let processedText = finalText || deltaText || '(no output)';
 
-          params.log?.info({ sessionKey, sessionId }, 'reaction:invoke:end');
+          params.log?.info({ sessionKey, sessionId, ms: Date.now() - t0, hadError: Boolean(invokeError) }, 'reaction:invoke:end');
 
           // Parse and execute Discord actions.
           if (params.discordActionsEnabled && msg.guild) {
@@ -316,6 +285,10 @@ export function createReactionAddHandler(
                 messageId: msg.id,
               };
               const results = await executeDiscordActions(parsed.actions, actCtx, params.log, params.beadCtx, params.cronCtx);
+              for (const result of results) {
+                metrics.recordActionResult(result.ok);
+                params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
+              }
               const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
               processedText = parsed.cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
 
@@ -332,21 +305,17 @@ export function createReactionAddHandler(
             }
           }
 
-          // Format and post reply.
-          const outText = truncateCodeBlocks(processedText);
-          const chunks = splitDiscord(outText);
-
-          await msg.reply({ content: chunks[0] ?? '(no output)', allowedMentions: NO_MENTIONS });
-          for (const extra of chunks.slice(1)) {
-            await (msg.channel as any).send({ content: extra, allowedMentions: NO_MENTIONS });
-          }
+          await replyThenSendChunks(msg as any, processedText);
         } catch (err) {
+          metrics.increment('discord.reaction.handler_error');
           params.log?.error({ err, sessionKey }, 'reaction:handler failed');
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           statusRef?.current?.handlerError({ sessionKey }, err);
         }
       });
     } catch (err) {
+      const metrics = params.metrics ?? globalMetrics;
+      metrics.increment('discord.reaction.handler_wrapper_error');
       params.log?.error({ err }, 'reaction:messageReactionAdd failed');
     }
   };

@@ -259,40 +259,27 @@ describe('createReactionAddHandler', () => {
     expect(prompt).toContain('https://cdn.example.com/image.png');
   });
 
-  it('prompt includes durable memory when enabled', async () => {
-    // Mock durable memory module.
-    const { loadDurableMemory } = await import('./durable-memory.js');
-    vi.mock('./durable-memory.js', async (importOriginal) => {
-      const mod = await importOriginal<typeof import('./durable-memory.js')>();
-      return {
-        ...mod,
-        loadDurableMemory: vi.fn().mockResolvedValue({
-          version: 1,
-          updatedAt: Date.now(),
-          items: [{
-            id: 'test',
-            kind: 'fact',
-            text: 'User loves TypeScript',
-            tags: [],
-            status: 'active',
-            source: { type: 'manual' },
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-          }],
-        }),
-        selectItemsForInjection: vi.fn().mockReturnValue([{
-          id: 'test',
-          kind: 'fact',
-          text: 'User loves TypeScript',
-          tags: [],
-          status: 'active',
-          source: { type: 'manual' },
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        }]),
-        formatDurableSection: vi.fn().mockReturnValue('[fact] User loves TypeScript'),
-      };
-    });
+  it('prompt includes durable memory when enabled and store has items', async () => {
+    // Write a real durable memory file so the handler loads it without mocking.
+    const os = await import('node:os');
+    const fsP = await import('node:fs/promises');
+    const pathM = await import('node:path');
+    const tmpDir = await fsP.mkdtemp(pathM.join(os.tmpdir(), 'durable-'));
+    const store = {
+      version: 1,
+      updatedAt: Date.now(),
+      items: [{
+        id: 'test-1',
+        kind: 'fact',
+        text: 'User loves TypeScript',
+        tags: [],
+        status: 'active',
+        source: { type: 'manual' },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }],
+    };
+    await fsP.writeFile(pathM.join(tmpDir, 'user-1.json'), JSON.stringify(store), 'utf8');
 
     const invokeSpy = vi.fn();
     const runtime: RuntimeAdapter = {
@@ -304,18 +291,16 @@ describe('createReactionAddHandler', () => {
         yield { type: 'done' };
       },
     };
-    const params = makeParams({ runtime, durableMemoryEnabled: true });
+    const params = makeParams({ runtime, durableMemoryEnabled: true, durableDataDir: tmpDir });
     const queue = mockQueue();
-
-    // Re-import the handler to pick up the mock.
-    const { createReactionAddHandler: handlerFactory } = await import('./reaction-handler.js');
-    const handler = handlerFactory(params, queue);
+    const handler = createReactionAddHandler(params, queue);
     await handler(mockReaction() as any, mockUser() as any);
 
     const prompt: string = invokeSpy.mock.calls[0][0].prompt;
     expect(prompt).toContain('Durable memory');
+    expect(prompt).toContain('User loves TypeScript');
 
-    vi.restoreAllMocks();
+    await fsP.rm(tmpDir, { recursive: true });
   });
 
   it('Discord actions parsed and executed from response, results appended to output', async () => {
@@ -323,7 +308,7 @@ describe('createReactionAddHandler', () => {
       id: 'claude_code',
       capabilities: new Set(['streaming_text']),
       async *invoke(): AsyncIterable<EngineEvent> {
-        yield { type: 'text_final', text: 'Here is my response\n\n```discord-action\n{"type":"react","emoji":"✅","messageId":"msg-1"}\n```' };
+        yield { type: 'text_final', text: 'Here is my response\n\n<discord-action>{"type":"react","channelId":"ch-1","messageId":"msg-1","emoji":"✅"}</discord-action>' };
         yield { type: 'done' };
       },
     };
@@ -338,8 +323,12 @@ describe('createReactionAddHandler', () => {
     const reaction = mockReaction();
     await handler(reaction as any, mockUser() as any);
 
-    // The reply should have been posted (actions are best-effort, results appended).
     expect(reaction.message.reply).toHaveBeenCalledOnce();
+    const replyContent: string = reaction.message.reply.mock.calls[0][0].content;
+    // The action block should be stripped from the clean text.
+    expect(replyContent).not.toContain('<discord-action>');
+    // Action results (Done: or Failed:) should be appended.
+    expect(replyContent).toMatch(/Done:|Failed:/);
   });
 
   it('fetches partial reaction before processing', async () => {
@@ -416,8 +405,9 @@ describe('createReactionAddHandler', () => {
 
     expect(params.log?.error).toHaveBeenCalled();
     expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
-    // Reply should NOT be posted on error.
-    expect(reaction.message.reply).not.toHaveBeenCalled();
+    expect(reaction.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Runtime error: timeout reached') }),
+    );
   });
 
   it('joins thread before replying when autoJoinThreads is enabled', async () => {

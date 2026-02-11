@@ -10,10 +10,11 @@ import type { CronRunStats } from './run-stats.js';
 import { acquireCronLock, releaseCronLock } from './job-lock.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
-import { splitDiscord, truncateCodeBlocks } from '../discord.js';
-import { NO_MENTIONS } from '../discord/allowed-mentions.js';
-import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
+import { sendChunks } from '../discord/output-common.js';
+import { resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
+import { globalMetrics } from '../observability/metrics.js';
+import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 
 export type CronExecutorContext = {
   client: Client;
@@ -45,8 +46,11 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
 }
 
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
+  const metrics = globalMetrics;
+
   // Overlap guard: skip if previous run is still going (in-memory, no lock touched).
   if (job.running) {
+    metrics.increment('cron.run.skipped');
     ctx.log?.warn({ jobId: job.id, name: job.name }, 'cron:skip (previous run still active)');
     return;
   }
@@ -57,6 +61,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     try {
       lockToken = await acquireCronLock(ctx.lockDir, job.cronId);
     } catch (err) {
+      metrics.increment('cron.run.skipped');
       ctx.log?.warn({ jobId: job.id, cronId: job.cronId, err }, 'cron:skip (lock acquire failed)');
       return;
     }
@@ -109,25 +114,40 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       `Post your response to the Discord channel #${job.def.channel}. ` +
       `Keep your response concise and focused on the instruction above.`;
 
-    const permissions = await loadWorkspacePermissions(ctx.cwd, ctx.log);
-    const effectiveTools = resolveTools(permissions, ctx.tools);
+    const tools = await resolveEffectiveTools({
+      workspaceCwd: ctx.cwd,
+      runtimeTools: ctx.tools,
+      log: ctx.log,
+    });
+    const effectiveTools = tools.effectiveTools;
 
     // Per-cron model selection: override > AI-classified > global default.
     let effectiveModel = ctx.model;
-    if (ctx.statsStore && job.cronId) {
-      const record = ctx.statsStore.getRecord(job.cronId);
-      if (record) {
-        effectiveModel = record.modelOverride ?? record.model ?? ctx.model;
-      }
+    const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
+    if (preRunRecord) {
+      effectiveModel = preRunRecord.modelOverride ?? preRunRecord.model ?? ctx.model;
     }
 
     ctx.log?.info(
-      { jobId: job.id, name: job.name, channel: job.def.channel, model: effectiveModel, permissionTier: permissions?.tier ?? 'env' },
+      { jobId: job.id, name: job.name, channel: job.def.channel, model: effectiveModel, permissionTier: tools.permissionTier },
       'cron:exec start',
     );
 
+    // Best-effort: update pinned status message to show running indicator.
+    if (preRunRecord && job.cronId) {
+      try {
+        await ensureStatusMessage(ctx.client, job.threadId, job.cronId, preRunRecord, ctx.statsStore!, { log: ctx.log, running: true });
+      } catch {
+        // Non-fatal — don't block execution.
+      }
+    }
+
+    metrics.recordInvokeStart('cron');
+    ctx.log?.info({ flow: 'cron', jobId: job.id, cronId: job.cronId }, 'obs.invoke.start');
+
     let finalText = '';
     let deltaText = '';
+    const t0 = Date.now();
     for await (const evt of ctx.runtime.invoke({
       prompt,
       model: effectiveModel,
@@ -140,18 +160,29 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       } else if (evt.type === 'text_delta') {
         deltaText += evt.text;
       } else if (evt.type === 'error') {
+        metrics.recordInvokeResult('cron', Date.now() - t0, false, evt.message);
+        metrics.increment('cron.run.error');
         ctx.log?.error({ jobId: job.id, error: evt.message }, 'cron:exec runtime error');
+        ctx.log?.warn({ flow: 'cron', jobId: job.id, error: evt.message }, 'obs.invoke.error');
         await ctx.status?.runtimeError(
           { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
           `Cron "${job.name}": ${evt.message}`,
         );
+        try {
+          await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(evt.message));
+        } catch {
+          // Best-effort user-facing signal; status channel/log already carry details.
+        }
         await recordError(ctx, job, evt.message);
         return;
       }
     }
+    metrics.recordInvokeResult('cron', Date.now() - t0, true);
+    ctx.log?.info({ flow: 'cron', jobId: job.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
 
     const output = finalText || deltaText;
     if (!output.trim()) {
+      metrics.increment('cron.run.skipped');
       ctx.log?.warn({ jobId: job.id }, 'cron:exec empty output');
       return;
     }
@@ -169,6 +200,10 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           messageId: '',
         };
         const results = await executeDiscordActions(actions, actCtx, ctx.log, ctx.beadCtx, ctx.cronCtx);
+        for (const result of results) {
+          metrics.recordActionResult(result.ok);
+          ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
+        }
         const resultLines = results.map((r) => r.ok ? `Done: ${r.summary}` : `Failed: ${r.error}`);
         processedText = cleanText.trimEnd() + '\n\n' + resultLines.join('\n');
 
@@ -184,14 +219,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       }
     }
 
-    // Chunk output like the main message handler (fence-safe splitting).
-    const outText = truncateCodeBlocks(processedText);
-    const chunks = splitDiscord(outText);
-    for (const chunk of chunks) {
-      if (chunk.trim()) {
-        await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
-      }
-    }
+    await sendChunks(targetChannel as any, processedText);
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
 
@@ -199,17 +227,31 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     if (ctx.statsStore && job.cronId) {
       try {
         await ctx.statsStore.recordRun(job.cronId, 'success');
+        metrics.increment('cron.run.success');
       } catch (statsErr) {
         ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
       }
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    metrics.increment('cron.run.error');
     ctx.log?.error({ err, jobId: job.id }, 'cron:exec failed');
     await ctx.status?.runtimeError(
       { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
       `Cron "${job.name}": ${msg}`,
     );
+
+    if (ctx.client) {
+      const guild = ctx.client.guilds.cache.get(job.guildId);
+      const targetChannel = guild ? resolveChannel(guild, job.def.channel) : null;
+      if (targetChannel) {
+        try {
+          await sendChunks(targetChannel as any, mapRuntimeErrorToUserMessage(msg));
+        } catch {
+          // Best-effort.
+        }
+      }
+    }
 
     await recordError(ctx, job, msg);
   } finally {
@@ -225,7 +267,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       try {
         const record = ctx.statsStore.getRecord(job.cronId);
         if (record) {
-          await ensureStatusMessage(ctx.client, job.threadId, job.cronId, record, ctx.statsStore, ctx.log);
+          await ensureStatusMessage(ctx.client, job.threadId, job.cronId, record, ctx.statsStore, { log: ctx.log });
         }
       } catch (statusErr) {
         ctx.log?.warn({ err: statusErr, jobId: job.id }, 'cron:exec status message update failed');
