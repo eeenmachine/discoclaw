@@ -51,7 +51,7 @@ export function renderHealthReport(opts: {
   lines.push(`${opts.botDisplayName ?? 'Discoclaw'} Health`);
   lines.push(`Uptime: ${formatUptime(Date.now() - snap.startedAt)}`);
   lines.push(`Queue depth: ${opts.queueDepth}`);
-  lines.push(`Messages: ${counters['discord.message.received'] ?? 0} | Reactions: ${counters['discord.reaction.received'] ?? 0}`);
+  lines.push(`Messages: ${counters['discord.message.received'] ?? 0} | Reactions: ${counters['discord.reaction.received'] ?? 0} add / ${counters['discord.reaction_remove.received'] ?? 0} remove`);
   lines.push(`Invokes: started=${(counters['invoke.message.started'] ?? 0) + (counters['invoke.reaction.started'] ?? 0) + (counters['invoke.cron.started'] ?? 0)} ` +
     `ok=${(counters['invoke.message.succeeded'] ?? 0) + (counters['invoke.reaction.succeeded'] ?? 0) + (counters['invoke.cron.succeeded'] ?? 0)} ` +
     `failed=${(counters['invoke.message.failed'] ?? 0) + (counters['invoke.reaction.failed'] ?? 0) + (counters['invoke.cron.failed'] ?? 0)}`);

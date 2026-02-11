@@ -590,4 +590,59 @@ describe('createReactionRemoveHandler', () => {
     const snap = metrics.snapshot();
     expect(snap.counters['discord.reaction_remove.received']).toBe(1);
   });
+
+  it('handles partial reaction fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Reaction')),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles partial message fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const msg = mockMessage({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Message')),
+    });
+    const reaction = mockReaction({ message: msg });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles runtime error (logged, status posted)', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue, statusRef);
+
+    const reaction = mockReaction();
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.error).toHaveBeenCalled();
+    expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
+    expect(reaction.message.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Runtime error: timeout reached') }),
+    );
+  });
 });
