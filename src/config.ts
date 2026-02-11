@@ -359,7 +359,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       groupsDirOverride: parseTrimmedString(env, 'GROUPS_DIR'),
       useGroupDirCwd: parseBoolean(env, 'USE_GROUP_DIR_CWD', false),
 
-      beadsEnabled: parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', false),
+      beadsEnabled: parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true),
       beadsCwdOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_CWD'),
       beadsForum: parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM'),
       beadsTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_TAG_MAP'),

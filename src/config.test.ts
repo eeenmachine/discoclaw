@@ -193,6 +193,12 @@ describe('parseConfig', () => {
     expect(config.shortTermInjectMaxChars).toBe(1000);
   });
 
+  // --- Beads enabled ---
+  it('defaults beadsEnabled to true', () => {
+    const { config } = parseConfig(env());
+    expect(config.beadsEnabled).toBe(true);
+  });
+
   // --- Beads sidebar ---
   it('defaults beadsSidebar to false', () => {
     const { config } = parseConfig(env());
