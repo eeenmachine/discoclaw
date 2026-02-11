@@ -173,7 +173,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     if (!record) continue;
 
     try {
-      await ensureStatusMessage(client, fullJob.threadId, fullJob.cronId, record, statsStore, log);
+      await ensureStatusMessage(client, fullJob.threadId, fullJob.cronId, record, statsStore, { log });
       statusMessagesUpdated++;
     } catch (err) {
       log?.warn({ err, jobId: job.id }, 'cron-sync:phase3 status message failed');

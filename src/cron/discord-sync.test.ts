@@ -82,6 +82,38 @@ describe('formatStatusMessage', () => {
     expect(msg).toContain('opus');
   });
 
+  it('includes "Currently running" when running is true', () => {
+    const record: CronRunRecord = {
+      cronId: 'cron-run1',
+      threadId: 'thread-1',
+      runCount: 3,
+      lastRunAt: '2025-01-15T10:00:00Z',
+      lastRunStatus: 'success',
+      cadence: 'daily',
+      purposeTags: [],
+      disabled: false,
+      model: 'haiku',
+    };
+    const msg = formatStatusMessage('cron-run1', record, true);
+    expect(msg).toContain('Currently running');
+  });
+
+  it('does not include "Currently running" when running is false', () => {
+    const record: CronRunRecord = {
+      cronId: 'cron-run2',
+      threadId: 'thread-1',
+      runCount: 3,
+      lastRunAt: '2025-01-15T10:00:00Z',
+      lastRunStatus: 'success',
+      cadence: 'daily',
+      purposeTags: [],
+      disabled: false,
+      model: 'haiku',
+    };
+    const msg = formatStatusMessage('cron-run2', record, false);
+    expect(msg).not.toContain('Currently running');
+  });
+
   it('shows N/A when no model or cadence', () => {
     const record: CronRunRecord = {
       cronId: 'cron-na',
@@ -211,9 +243,30 @@ describe('ensureStatusMessage', () => {
     };
     const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    const result = await ensureStatusMessage(client as any, 'missing', 'cron-test1', makeRecord(), makeStats(), log);
+    const result = await ensureStatusMessage(client as any, 'missing', 'cron-test1', makeRecord(), makeStats(), { log });
     expect(result).toBeUndefined();
     expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('passes running flag through to formatted content', async () => {
+    const sentMsg = { id: 'run-msg-1', pin: vi.fn() };
+    const thread = {
+      isThread: () => true,
+      send: vi.fn(async () => sentMsg),
+      messages: { fetch: vi.fn() },
+    };
+    const client = {
+      channels: {
+        cache: { get: () => thread },
+        fetch: vi.fn(async () => thread),
+      },
+    };
+    const stats = makeStats();
+
+    await ensureStatusMessage(client as any, 'thread-1', 'cron-test1', makeRecord(), stats, { running: true });
+    expect(thread.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('Currently running') }),
+    );
   });
 
   it('creates new message when existing statusMessageId is stale', async () => {

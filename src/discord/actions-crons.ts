@@ -163,7 +163,7 @@ export async function executeCronAction(
 
       // Create status message.
       try {
-        await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, cronCtx.log);
+        await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, { log: cronCtx.log });
       } catch {}
 
       return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}` };
@@ -250,7 +250,7 @@ export async function executeCronAction(
       try {
         const updatedRecord = cronCtx.statsStore.getRecord(action.cronId);
         if (updatedRecord) {
-          await ensureStatusMessage(cronCtx.client, record.threadId, action.cronId, updatedRecord, cronCtx.statsStore, cronCtx.log);
+          await ensureStatusMessage(cronCtx.client, record.threadId, action.cronId, updatedRecord, cronCtx.statsStore, { log: cronCtx.log });
         }
       } catch {}
 
@@ -287,12 +287,13 @@ export async function executeCronAction(
         const fullJob = cronCtx.scheduler.getJob(j.id);
         const record = fullJob?.cronId ? cronCtx.statsStore.getRecord(fullJob.cronId) : undefined;
         const status = record?.disabled ? 'paused' : (record?.lastRunStatus ?? 'pending');
+        const displayStatus = fullJob?.running ? `${status} \uD83D\uDD04` : status;
         const model = record?.modelOverride ?? record?.model ?? '?';
         const runs = record?.runCount ?? 0;
         const tags = record?.purposeTags?.join(', ') || '';
         const nextRun = j.nextRun ? `<t:${Math.floor(j.nextRun.getTime() / 1000)}:R>` : 'N/A';
         const cronId = fullJob?.cronId ?? '?';
-        return `\`${cronId}\` **${j.name}** | \`${j.schedule}\` | ${status} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}`;
+        return `\`${cronId}\` **${j.name}** | \`${j.schedule}\` | ${displayStatus} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}`;
       });
       return { ok: true, summary: lines.join('\n') };
     }
@@ -317,6 +318,9 @@ export async function executeCronAction(
         lines.push(`Next run: ${nextRun ? `<t:${Math.floor(nextRun.getTime() / 1000)}:F>` : 'N/A'}`);
       }
       lines.push(`Status: ${record.disabled ? 'paused' : 'active'}`);
+      if (job?.running) {
+        lines.push(`Runtime: \uD83D\uDD04 running`);
+      }
       lines.push(`Model: ${record.modelOverride ?? record.model ?? 'N/A'}${record.modelOverride ? ' (override)' : ''}`);
       lines.push(`Cadence: ${record.cadence ?? 'N/A'}`);
       lines.push(`Runs: ${record.runCount} | Last: ${record.lastRunStatus ?? 'never'}`);

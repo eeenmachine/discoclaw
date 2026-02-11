@@ -189,7 +189,7 @@ async function loadThreadAsCron(
       try {
         const record = opts.statsStore.getRecord(cronId);
         if (record) {
-          await ensureStatusMessage(thread.client, thread.id, cronId, record, opts.statsStore, opts.log);
+          await ensureStatusMessage(thread.client, thread.id, cronId, record, opts.statsStore, { log: opts.log });
         }
       } catch {
         // Best-effort.

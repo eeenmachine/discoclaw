@@ -208,6 +208,37 @@ describe('executeCronAction', () => {
     expect(cronCtx.statsStore.removeRecord).toHaveBeenCalledWith('cron-test0001');
   });
 
+  it('cronList shows running emoji when job is running', async () => {
+    const cronCtx = makeCronCtx();
+    const job = cronCtx.scheduler.getJob('thread-1');
+    job!.running = true;
+    const result = await executeCronAction({ type: 'cronList' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('\uD83D\uDD04');
+    }
+  });
+
+  it('cronShow shows Runtime line when job is running', async () => {
+    const cronCtx = makeCronCtx();
+    const job = cronCtx.scheduler.getJob('thread-1');
+    job!.running = true;
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Runtime:');
+    }
+  });
+
+  it('cronShow does not show Runtime line when job is not running', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).not.toContain('Runtime:');
+    }
+  });
+
   it('cronCreate validates required fields', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction({ type: 'cronCreate', name: '', schedule: '', channel: '', prompt: '' } as any, makeActionCtx(), cronCtx);

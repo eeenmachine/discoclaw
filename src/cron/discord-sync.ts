@@ -55,9 +55,15 @@ export function buildCronThreadName(name: string, cadence: CadenceTag | null): s
 // Status message formatting
 // ---------------------------------------------------------------------------
 
-export function formatStatusMessage(cronId: string, record: CronRunRecord): string {
+// Running indicator is per-process in-memory state; not cross-process,
+// clears on restart, and `cronTrigger --force` can make it inaccurate.
+export function formatStatusMessage(cronId: string, record: CronRunRecord, running?: boolean): string {
   const lines: string[] = [];
   lines.push(`\uD83D\uDCCA **Cron Status** [cronId:${cronId}]`);
+
+  if (running) {
+    lines.push('\uD83D\uDD04 **Currently running**');
+  }
 
   const lastRun = record.lastRunAt
     ? `<t:${Math.floor(new Date(record.lastRunAt).getTime() / 1000)}:R>`
@@ -103,15 +109,16 @@ export async function ensureStatusMessage(
   cronId: string,
   record: CronRunRecord,
   stats: CronRunStats,
-  log?: LoggerLike,
+  opts?: { log?: LoggerLike; running?: boolean },
 ): Promise<string | undefined> {
+  const { log, running } = opts ?? {};
   const thread = await fetchThreadChannel(client, threadId);
   if (!thread) {
     log?.warn({ threadId, cronId }, 'cron:status-msg thread not found');
     return undefined;
   }
 
-  const content = formatStatusMessage(cronId, record);
+  const content = formatStatusMessage(cronId, record, running);
 
   // Try to edit existing status message.
   if (record.statusMessageId) {
