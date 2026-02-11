@@ -396,6 +396,7 @@ describe('createReactionAddHandler', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
     };
     const statusRef: StatusRef = { current: statusPoster };
     const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });

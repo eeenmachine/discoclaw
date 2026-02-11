@@ -76,6 +76,7 @@ vi.mock('../beads/bead-sync.js', () => ({
     starterMessagesUpdated: 5,
     threadsArchived: 3,
     statusesUpdated: 4,
+    warnings: 0,
   })),
 }));
 
@@ -277,6 +278,22 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('status-fixes');
     expect((result as any).summary).toContain('5 starters');
+  });
+
+  it('beadSync passes statusPoster through to runBeadSync', async () => {
+    const { runBeadSync } = await import('../beads/bead-sync.js');
+    (runBeadSync as any).mockClear();
+
+    const mockPoster = { beadSyncComplete: vi.fn() } as any;
+    await executeBeadAction(
+      { type: 'beadSync' },
+      makeCtx(),
+      makeBeadCtx({ statusPoster: mockPoster }),
+    );
+
+    expect(runBeadSync).toHaveBeenCalledWith(
+      expect.objectContaining({ statusPoster: mockPoster }),
+    );
   });
 });
 

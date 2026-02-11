@@ -134,6 +134,7 @@ describe('executeCronJob', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
     };
     const ctx = makeCtx({ runtime: makeMockRuntimeError('timeout'), status });
     const job = makeJob();
@@ -173,6 +174,7 @@ describe('executeCronJob', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
     };
     const ctx = makeCtx({ client: client as any, status });
     const job = makeJob();
@@ -189,6 +191,7 @@ describe('executeCronJob', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
     };
     const ctx = makeCtx({ status, allowChannelIds: new Set(['some-other-channel']) });
     const job = makeJob();
@@ -207,6 +210,7 @@ describe('executeCronJob', () => {
       runtimeError: vi.fn(),
       handlerError: vi.fn(),
       actionFailed: vi.fn(),
+      beadSyncComplete: vi.fn(),
     };
     const ctx = makeCtx({ status, allowChannelIds: new Set(['ch-1']) });
     const job = makeJob();

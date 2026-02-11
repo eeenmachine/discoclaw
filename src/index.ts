@@ -352,6 +352,7 @@ if (beadsEnabled) {
         autoTag: beadsAutoTag,
         autoTagModel: beadsAutoTagModel,
         mentionUserId: beadsMentionUser,
+        statusPoster: botStatus ?? undefined,
         log,
       };
       botParams.beadCtx = beadCtx;

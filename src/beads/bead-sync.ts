@@ -1,6 +1,7 @@
 import type { Client, Guild } from 'discord.js';
 import type { TagMap, BeadData } from './types.js';
 import type { LoggerLike } from '../discord/action-types.js';
+import type { StatusPoster } from '../discord/status-channel.js';
 import { bdList, bdUpdate } from './bd-cli.js';
 import {
   resolveBeadsForum,
@@ -23,6 +24,7 @@ export type BeadSyncOptions = {
   log?: LoggerLike;
   throttleMs?: number;
   archivedDedupeLimit?: number;
+  statusPoster?: StatusPoster;
 };
 
 export type BeadSyncResult = {
@@ -31,6 +33,7 @@ export type BeadSyncResult = {
   starterMessagesUpdated: number;
   threadsArchived: number;
   statusesUpdated: number;
+  warnings: number;
 };
 
 function hasLabel(bead: BeadData, label: string): boolean {
@@ -58,7 +61,9 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   const forum = await resolveBeadsForum(guild, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'bead-sync: forum not found');
-    return { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0 };
+    const result: BeadSyncResult = { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0, warnings: 1 };
+    await opts.statusPoster?.beadSyncComplete(result);
+    return result;
   }
 
   let threadsCreated = 0;
@@ -66,6 +71,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   let starterMessagesUpdated = 0;
   let threadsArchived = 0;
   let statusesUpdated = 0;
+  let warnings = 0;
 
   // Load all beads (including closed for Phase 4).
   const allBeads = await bdList({ status: 'all' }, beadsCwd);
@@ -88,6 +94,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
           log?.info({ beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfilled');
         } catch (err) {
           log?.warn({ err, beadId: bead.id, threadId: existing }, 'bead-sync:phase1 external-ref backfill failed');
+          warnings++;
         }
         await sleep(throttleMs);
         continue;
@@ -99,11 +106,13 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
         await bdUpdate(bead.id, { externalRef: `discord:${threadId}` }, beadsCwd);
       } catch (err) {
         log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 external-ref update failed');
+        warnings++;
       }
       threadsCreated++;
       log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase1 thread created');
     } catch (err) {
       log?.warn({ err, beadId: bead.id }, 'bead-sync:phase1 failed');
+      warnings++;
     }
     await sleep(throttleMs);
   }
@@ -119,6 +128,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       log?.info({ beadId: bead.id }, 'bead-sync:phase2 status updated to blocked');
     } catch (err) {
       log?.warn({ err, beadId: bead.id }, 'bead-sync:phase2 failed');
+      warnings++;
     }
     await sleep(throttleMs);
   }
@@ -139,6 +149,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       }
     } catch (err) {
       log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 failed');
+      warnings++;
     }
     try {
       const starterChanged = await updateBeadStarterMessage(client, threadId, bead);
@@ -148,6 +159,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       }
     } catch (err) {
       log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 starter update failed');
+      warnings++;
     }
     await sleep(throttleMs);
   }
@@ -174,10 +186,13 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
       log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase4 archived');
     } catch (err) {
       log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase4 failed');
+      warnings++;
     }
     await sleep(throttleMs);
   }
 
-  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated }, 'bead-sync: complete');
-  return { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated };
+  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, warnings }, 'bead-sync: complete');
+  const result: BeadSyncResult = { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, warnings };
+  await opts.statusPoster?.beadSyncComplete(result);
+  return result;
 }

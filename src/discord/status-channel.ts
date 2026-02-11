@@ -1,5 +1,6 @@
 import { EmbedBuilder } from 'discord.js';
 import type { LoggerLike } from './action-types.js';
+import type { BeadSyncResult } from '../beads/bead-sync.js';
 
 type Sendable = { send(opts: { embeds: EmbedBuilder[] }): Promise<unknown> };
 
@@ -9,6 +10,7 @@ export type StatusPoster = {
   runtimeError(context: { sessionKey: string; channelName?: string }, message: string): Promise<void>;
   handlerError(context: { sessionKey: string }, err: unknown): Promise<void>;
   actionFailed(actionType: string, error: string): Promise<void>;
+  beadSyncComplete(result: BeadSyncResult): Promise<void>;
 };
 
 const Colors = {
@@ -87,6 +89,27 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
           )
           .setTimestamp(),
       );
+    },
+
+    async beadSyncComplete(result) {
+      const { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated, warnings } = result;
+      const allZero = threadsCreated === 0 && emojisUpdated === 0 && starterMessagesUpdated === 0 && threadsArchived === 0 && statusesUpdated === 0;
+      if (allZero && warnings === 0) return;
+
+      const color = warnings > 0 ? Colors.orange : Colors.green;
+      const embed = new EmbedBuilder()
+        .setColor(color)
+        .setTitle('Bead Sync Complete')
+        .setTimestamp();
+
+      if (threadsCreated > 0) embed.addFields({ name: 'Created', value: String(threadsCreated), inline: true });
+      if (emojisUpdated > 0) embed.addFields({ name: 'Names Updated', value: String(emojisUpdated), inline: true });
+      if (starterMessagesUpdated > 0) embed.addFields({ name: 'Starters Updated', value: String(starterMessagesUpdated), inline: true });
+      if (threadsArchived > 0) embed.addFields({ name: 'Archived', value: String(threadsArchived), inline: true });
+      if (statusesUpdated > 0) embed.addFields({ name: 'Statuses Fixed', value: String(statusesUpdated), inline: true });
+      if (warnings > 0) embed.addFields({ name: 'Warnings', value: String(warnings), inline: true });
+
+      await send(embed);
     },
   };
 }

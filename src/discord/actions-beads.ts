@@ -1,6 +1,7 @@
 import type { ForumChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from './action-types.js';
+import type { StatusPoster } from './status-channel.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { TagMap, BeadData, BeadStatus } from '../beads/types.js';
 import { isBeadStatus } from '../beads/types.js';
@@ -46,6 +47,7 @@ export type BeadContext = {
   autoTag: boolean;
   autoTagModel: string;
   mentionUserId?: string;
+  statusPoster?: StatusPoster;
   log?: LoggerLike;
 };
 
@@ -259,6 +261,7 @@ export async function executeBeadAction(
           tagMap: beadCtx.tagMap,
           beadsCwd: beadCtx.beadsCwd,
           log: beadCtx.log,
+          statusPoster: beadCtx.statusPoster,
         });
         return {
           ok: true,

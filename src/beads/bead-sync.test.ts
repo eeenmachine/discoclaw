@@ -229,5 +229,77 @@ describe('runBeadSync', () => {
     expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), '777', expect.objectContaining({ id: 'ws-007', status: 'tombstone' }));
     expect(result.threadsArchived).toBe(1);
   });
+
+  it('calls statusPoster.beadSyncComplete with the result when provided', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    (bdList as any).mockResolvedValueOnce([]);
+
+    const statusPoster = { beadSyncComplete: vi.fn(async () => {}) } as any;
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+      statusPoster,
+    } as any);
+
+    expect(statusPoster.beadSyncComplete).toHaveBeenCalledOnce();
+    expect(statusPoster.beadSyncComplete).toHaveBeenCalledWith(result);
+  });
+
+  it('works fine without statusPoster', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    (bdList as any).mockResolvedValueOnce([]);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.warnings).toBe(0);
+  });
+
+  it('increments warnings counter on phase failures', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { updateBeadThreadName } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-008', title: 'H', status: 'in_progress', labels: [], external_ref: 'discord:555' },
+    ]);
+    (updateBeadThreadName as any).mockRejectedValueOnce(new Error('Discord API failure'));
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.warnings).toBeGreaterThanOrEqual(1);
+  });
+
+  it('warnings counter increments when forum is not found', async () => {
+    const { resolveBeadsForum } = await import('./discord-sync.js');
+    (resolveBeadsForum as any).mockResolvedValueOnce(null);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.warnings).toBe(1);
+  });
 });
 
