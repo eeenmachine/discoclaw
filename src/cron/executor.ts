@@ -5,10 +5,12 @@ import type { StatusPoster } from '../discord/status-channel.js';
 import type { LoggerLike } from '../discord/action-types.js';
 import type { ActionCategoryFlags } from '../discord/actions.js';
 import type { BeadContext } from '../discord/actions-beads.js';
+import type { CronRunStats } from './run-stats.js';
 import { resolveChannel } from '../discord/action-utils.js';
 import { parseDiscordActions, executeDiscordActions } from '../discord/actions.js';
 import { splitDiscord, truncateCodeBlocks } from '../discord.js';
 import { loadWorkspacePermissions, resolveTools } from '../workspace-permissions.js';
+import { ensureStatusMessage } from './discord-sync.js';
 
 export type CronExecutorContext = {
   client: Client;
@@ -24,6 +26,7 @@ export type CronExecutorContext = {
   discordActionsEnabled: boolean;
   actionFlags: ActionCategoryFlags;
   beadCtx?: BeadContext;
+  statsStore?: CronRunStats;
 };
 
 export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Promise<void> {
@@ -79,8 +82,17 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const permissions = await loadWorkspacePermissions(ctx.cwd, ctx.log);
     const effectiveTools = resolveTools(permissions, ctx.tools);
 
+    // Per-cron model selection: override > AI-classified > global default.
+    let effectiveModel = ctx.model;
+    if (ctx.statsStore && job.cronId) {
+      const record = ctx.statsStore.getRecord(job.cronId);
+      if (record) {
+        effectiveModel = record.modelOverride ?? record.model ?? ctx.model;
+      }
+    }
+
     ctx.log?.info(
-      { jobId: job.id, name: job.name, channel: job.def.channel, permissionTier: permissions?.tier ?? 'env' },
+      { jobId: job.id, name: job.name, channel: job.def.channel, model: effectiveModel, permissionTier: permissions?.tier ?? 'env' },
       'cron:exec start',
     );
 
@@ -88,7 +100,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     let deltaText = '';
     for await (const evt of ctx.runtime.invoke({
       prompt,
-      model: ctx.model,
+      model: effectiveModel,
       cwd: ctx.cwd,
       timeoutMs: ctx.timeoutMs,
       tools: effectiveTools,
@@ -151,6 +163,15 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     ctx.log?.info({ jobId: job.id, name: job.name, channel: job.def.channel }, 'cron:exec done');
+
+    // Record successful run.
+    if (ctx.statsStore && job.cronId) {
+      try {
+        await ctx.statsStore.recordRun(job.cronId, 'success');
+      } catch (statsErr) {
+        ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     ctx.log?.error({ err, jobId: job.id }, 'cron:exec failed');
@@ -158,7 +179,28 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
       `Cron "${job.name}": ${msg}`,
     );
+
+    // Record error run.
+    if (ctx.statsStore && job.cronId) {
+      try {
+        await ctx.statsStore.recordRun(job.cronId, 'error', msg.slice(0, 200));
+      } catch {
+        // Best-effort.
+      }
+    }
   } finally {
     job.running = false;
+
+    // Update bot-owned status message.
+    if (ctx.statsStore && job.cronId) {
+      try {
+        const record = ctx.statsStore.getRecord(job.cronId);
+        if (record) {
+          await ensureStatusMessage(ctx.client, job.threadId, job.cronId, record, ctx.statsStore, ctx.log);
+        }
+      } catch (statusErr) {
+        ctx.log?.warn({ err: statusErr, jobId: job.id }, 'cron:exec status message update failed');
+      }
+    }
   }
 }
