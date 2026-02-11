@@ -8,6 +8,7 @@ import {
   closeBeadThread,
   isBeadThreadAlreadyClosed,
   updateBeadThreadName,
+  updateBeadStarterMessage,
   getThreadIdFromBead,
   ensureUnarchived,
   findExistingThreadForBead,
@@ -27,6 +28,7 @@ export type BeadSyncOptions = {
 export type BeadSyncResult = {
   threadsCreated: number;
   emojisUpdated: number;
+  starterMessagesUpdated: number;
   threadsArchived: number;
   statusesUpdated: number;
 };
@@ -56,11 +58,12 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   const forum = await resolveBeadsForum(guild, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'bead-sync: forum not found');
-    return { threadsCreated: 0, emojisUpdated: 0, threadsArchived: 0, statusesUpdated: 0 };
+    return { threadsCreated: 0, emojisUpdated: 0, starterMessagesUpdated: 0, threadsArchived: 0, statusesUpdated: 0 };
   }
 
   let threadsCreated = 0;
   let emojisUpdated = 0;
+  let starterMessagesUpdated = 0;
   let threadsArchived = 0;
   let statusesUpdated = 0;
 
@@ -137,6 +140,15 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     } catch (err) {
       log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 failed');
     }
+    try {
+      const starterChanged = await updateBeadStarterMessage(client, threadId, bead);
+      if (starterChanged) {
+        starterMessagesUpdated++;
+        log?.info({ beadId: bead.id, threadId }, 'bead-sync:phase3 starter updated');
+      }
+    } catch (err) {
+      log?.warn({ err, beadId: bead.id, threadId }, 'bead-sync:phase3 starter update failed');
+    }
     await sleep(throttleMs);
   }
 
@@ -166,6 +178,6 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     await sleep(throttleMs);
   }
 
-  log?.info({ threadsCreated, emojisUpdated, threadsArchived, statusesUpdated }, 'bead-sync: complete');
-  return { threadsCreated, emojisUpdated, threadsArchived, statusesUpdated };
+  log?.info({ threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated }, 'bead-sync: complete');
+  return { threadsCreated, emojisUpdated, starterMessagesUpdated, threadsArchived, statusesUpdated };
 }

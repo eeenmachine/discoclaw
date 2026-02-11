@@ -56,6 +56,7 @@ vi.mock('../beads/discord-sync.js', () => ({
   createBeadThread: vi.fn(async () => 'thread-new'),
   closeBeadThread: vi.fn(async () => {}),
   updateBeadThreadName: vi.fn(async () => {}),
+  updateBeadStarterMessage: vi.fn(async () => true),
   ensureUnarchived: vi.fn(async () => {}),
   getThreadIdFromBead: vi.fn((bead: any) => {
     const ref = bead.external_ref ?? '';
@@ -72,6 +73,7 @@ vi.mock('../beads/bead-sync.js', () => ({
   runBeadSync: vi.fn(async () => ({
     threadsCreated: 1,
     emojisUpdated: 2,
+    starterMessagesUpdated: 5,
     threadsArchived: 3,
     statusesUpdated: 4,
   })),
@@ -185,6 +187,34 @@ describe('executeBeadAction', () => {
     expect(result.ok).toBe(false);
   });
 
+  it('beadUpdate calls updateBeadStarterMessage when bead has a linked thread', async () => {
+    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
+    (updateBeadStarterMessage as any).mockClear();
+
+    await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', description: 'Updated desc' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(updateBeadStarterMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      '111222333',
+      expect.objectContaining({ id: 'ws-001' }),
+    );
+  });
+
+  it('beadUpdate succeeds even if updateBeadStarterMessage throws', async () => {
+    const { updateBeadStarterMessage } = await import('../beads/discord-sync.js');
+    (updateBeadStarterMessage as any).mockRejectedValueOnce(new Error('Discord API error'));
+
+    const result = await executeBeadAction(
+      { type: 'beadUpdate', beadId: 'ws-001', status: 'in_progress' },
+      makeCtx(),
+      makeBeadCtx(),
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it('beadUpdate rejects invalid status', async () => {
     const result = await executeBeadAction(
       { type: 'beadUpdate', beadId: 'ws-001', status: 'nonsense' },
@@ -246,6 +276,7 @@ describe('executeBeadAction', () => {
     );
     expect(result.ok).toBe(true);
     expect((result as any).summary).toContain('status-fixes');
+    expect((result as any).summary).toContain('5 starters');
   });
 });
 

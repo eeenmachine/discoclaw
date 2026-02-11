@@ -100,6 +100,22 @@ export async function loadTagMap(filePath: string): Promise<TagMap> {
 }
 
 // ---------------------------------------------------------------------------
+// Starter message content builder
+// ---------------------------------------------------------------------------
+
+/** Build the starter message content for a bead thread (no mention line). */
+export function buildBeadStarterContent(bead: BeadData): string {
+  const lines: string[] = [];
+  if (bead.description) lines.push(bead.description);
+  lines.push('');
+  lines.push(`**ID:** \`${bead.id}\``);
+  lines.push(`**Priority:** P${bead.priority ?? 2}`);
+  lines.push(`**Status:** ${bead.status}`);
+  if (bead.owner) lines.push(`**Owner:** ${bead.owner}`);
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Thread lifecycle operations
 // ---------------------------------------------------------------------------
 
@@ -122,16 +138,10 @@ export async function createBeadThread(
   }
   const uniqueTagIds = [...new Set(appliedTagIds)];
 
-  const descLines: string[] = [];
-  if (bead.description) descLines.push(bead.description);
-  descLines.push('');
-  descLines.push(`**ID:** \`${bead.id}\``);
-  descLines.push(`**Priority:** P${bead.priority ?? 2}`);
-  descLines.push(`**Status:** ${bead.status}`);
-  if (bead.owner) descLines.push(`**Owner:** ${bead.owner}`);
-  if (mentionUserId) descLines.push(`\n<@${mentionUserId}>`);
-
-  const message = descLines.join('\n').slice(0, 2000);
+  const baseContent = buildBeadStarterContent(bead);
+  const message = mentionUserId
+    ? `${baseContent}\n\n<@${mentionUserId}>`.slice(0, 2000)
+    : baseContent.slice(0, 2000);
 
   const thread = await forum.threads.create({
     name,
@@ -231,6 +241,33 @@ export async function updateBeadThreadName(
   if (current === newName) return false;
 
   await thread.setName(newName);
+  return true;
+}
+
+/** Update a thread's starter message to reflect current bead state. */
+export async function updateBeadStarterMessage(
+  client: Client,
+  threadId: string,
+  bead: BeadData,
+): Promise<boolean> {
+  const thread = await fetchThreadChannel(client, threadId);
+  if (!thread) return false;
+
+  let starter;
+  try {
+    starter = await thread.fetchStarterMessage();
+  } catch {
+    return false;
+  }
+  if (!starter) return false;
+
+  // Only edit messages authored by the bot.
+  if (starter.author.id !== client.user?.id) return false;
+
+  const newContent = buildBeadStarterContent(bead);
+  if (starter.content === newContent) return false;
+
+  await starter.edit({ content: newContent.slice(0, 2000), allowedMentions: { parse: [] } });
   return true;
 }
 

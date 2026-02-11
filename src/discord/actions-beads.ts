@@ -10,6 +10,7 @@ import {
   createBeadThread,
   closeBeadThread,
   updateBeadThreadName,
+  updateBeadStarterMessage,
   ensureUnarchived,
   getThreadIdFromBead,
 } from '../beads/discord-sync.js';
@@ -162,6 +163,11 @@ export async function executeBeadAction(
             } catch (err) {
               beadCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:thread name update failed');
             }
+            try {
+              await updateBeadStarterMessage(ctx.client, threadId, bead);
+            } catch (err) {
+              beadCtx.log?.warn({ err, beadId: action.beadId, threadId }, 'beads:starter message update failed');
+            }
           }
         }
       } catch (err) {
@@ -256,7 +262,7 @@ export async function executeBeadAction(
         });
         return {
           ok: true,
-          summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes`,
+          summary: `Sync complete: ${result.threadsCreated} created, ${result.emojisUpdated} updated, ${result.starterMessagesUpdated} starters, ${result.threadsArchived} archived, ${result.statusesUpdated} status-fixes`,
         };
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

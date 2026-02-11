@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildThreadName, getThreadIdFromBead } from './discord-sync.js';
+import { buildThreadName, buildBeadStarterContent, getThreadIdFromBead } from './discord-sync.js';
 import type { BeadData } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -37,6 +37,57 @@ describe('buildThreadName', () => {
   it('defaults to open emoji for unknown status', () => {
     const name = buildThreadName('ws-001', 'Test', 'unknown_status');
     expect(name).toContain('\u{1F7E2}');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildBeadStarterContent
+// ---------------------------------------------------------------------------
+
+describe('buildBeadStarterContent', () => {
+  const makeBead = (overrides?: Partial<BeadData>): BeadData => ({
+    id: 'ws-001',
+    title: 'Test',
+    description: 'A test bead',
+    status: 'open',
+    priority: 2,
+    issue_type: 'task',
+    owner: '',
+    external_ref: '',
+    labels: [],
+    comments: [],
+    created_at: '',
+    updated_at: '',
+    close_reason: '',
+    ...overrides,
+  });
+
+  it('produces correct format with description, ID, priority, status', () => {
+    const content = buildBeadStarterContent(makeBead());
+    expect(content).toContain('A test bead');
+    expect(content).toContain('**ID:** `ws-001`');
+    expect(content).toContain('**Priority:** P2');
+    expect(content).toContain('**Status:** open');
+  });
+
+  it('includes owner when present', () => {
+    const content = buildBeadStarterContent(makeBead({ owner: 'alice' }));
+    expect(content).toContain('**Owner:** alice');
+  });
+
+  it('omits owner when empty', () => {
+    const content = buildBeadStarterContent(makeBead({ owner: '' }));
+    expect(content).not.toContain('**Owner:**');
+  });
+
+  it('does not include mention lines', () => {
+    const content = buildBeadStarterContent(makeBead());
+    expect(content).not.toContain('<@');
+  });
+
+  it('defaults priority to P2 when undefined', () => {
+    const content = buildBeadStarterContent(makeBead({ priority: undefined as any }));
+    expect(content).toContain('**Priority:** P2');
   });
 });
 

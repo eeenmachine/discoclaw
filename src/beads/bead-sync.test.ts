@@ -12,6 +12,7 @@ vi.mock('./discord-sync.js', () => ({
   closeBeadThread: vi.fn(async () => {}),
   isBeadThreadAlreadyClosed: vi.fn(async () => false),
   updateBeadThreadName: vi.fn(async () => true),
+  updateBeadStarterMessage: vi.fn(async () => true),
   getThreadIdFromBead: vi.fn((bead: any) => {
     const ref = (bead.external_ref ?? '').trim();
     if (!ref) return null;
@@ -119,6 +120,49 @@ describe('runBeadSync', () => {
     expect(ensureUnarchived).toHaveBeenCalledWith(expect.anything(), '123');
     expect(updateBeadThreadName).toHaveBeenCalled();
     expect(result.emojisUpdated).toBe(1);
+  });
+
+  it('calls updateBeadStarterMessage for active beads with threads in phase 3', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-010', title: 'J', status: 'in_progress', labels: [], external_ref: 'discord:456' },
+    ]);
+    (updateBeadStarterMessage as any).mockResolvedValueOnce(true);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(updateBeadStarterMessage).toHaveBeenCalledWith(expect.anything(), '456', expect.objectContaining({ id: 'ws-010' }));
+    expect(result.starterMessagesUpdated).toBe(1);
+  });
+
+  it('starterMessagesUpdated stays 0 when updateBeadStarterMessage returns false', async () => {
+    const { bdList } = await import('./bd-cli.js');
+    const { updateBeadStarterMessage } = await import('./discord-sync.js');
+
+    (bdList as any).mockResolvedValueOnce([
+      { id: 'ws-011', title: 'K', status: 'open', labels: [], external_ref: 'discord:789' },
+    ]);
+    (updateBeadStarterMessage as any).mockResolvedValueOnce(false);
+
+    const result = await runBeadSync({
+      client: makeClient(),
+      guild: makeGuild(),
+      forumId: 'forum',
+      tagMap: {},
+      beadsCwd: '/tmp',
+      throttleMs: 0,
+    } as any);
+
+    expect(result.starterMessagesUpdated).toBe(0);
   });
 
   it('archives threads for closed beads in phase 4', async () => {
