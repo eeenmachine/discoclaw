@@ -365,7 +365,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // Keep prompt small: link to the channel context file and instruct the runtime to read it.
           // Workspace PA files — identity, personality, user profile (listed first so Claude reads them first).
-          const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md'];
+          const paFileNames = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
           const bootstrapPath = path.join(params.workspaceCwd, 'BOOTSTRAP.md');
           const paFiles: string[] = [];
           try { await fs.access(bootstrapPath); paFiles.push(bootstrapPath); } catch { /* no bootstrap */ }

@@ -485,6 +485,61 @@ describe('workspace PA files in prompt', () => {
     expect(bootstrapIdx).toBeGreaterThan(-1);
     expect(bootstrapIdx).toBeLessThan(soulIdx);
   });
+
+  it('includes TOOLS.md when present', async () => {
+    const queue = makeQueue();
+    let seenPrompt = '';
+    const runtime = {
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = p.prompt;
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pa-prompt-'));
+    await fs.writeFile(path.join(workspace, 'SOUL.md'), '# Soul', 'utf-8');
+    await fs.writeFile(path.join(workspace, 'TOOLS.md'), '# Tools', 'utf-8');
+
+    const handler = createMessageCreateHandler({
+      allowUserIds: new Set(['123']),
+      runtime,
+      sessionManager: { getOrCreate: vi.fn(async () => 'sess') } as any,
+      workspaceCwd: workspace,
+      groupsDir: '/tmp',
+      useGroupDirCwd: false,
+      runtimeModel: 'opus',
+      runtimeTools: [],
+      runtimeTimeoutMs: 1000,
+      requireChannelContext: false,
+      autoIndexChannelContext: false,
+      autoJoinThreads: false,
+      useRuntimeSessions: true,
+      discordActionsEnabled: false,
+      discordActionsChannels: true,
+      discordActionsMessaging: false,
+      discordActionsGuild: false,
+      discordActionsModeration: false,
+      discordActionsPolls: false,
+      discordActionsBeads: false,
+      messageHistoryBudget: 0,
+      summaryEnabled: false,
+      summaryModel: 'haiku',
+      summaryMaxChars: 2000,
+      summaryEveryNTurns: 5,
+      summaryDataDir: '/tmp/summaries',
+      durableMemoryEnabled: false,
+      durableDataDir: '/tmp/durable',
+      durableInjectMaxChars: 2000,
+      durableMaxItems: 200,
+      memoryCommandsEnabled: false,
+      actionFollowupDepth: 0,
+    }, queue);
+
+    await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
+
+    expect(runtime.invoke).toHaveBeenCalled();
+    expect(seenPrompt).toContain('TOOLS.md');
+  });
 });
 
 describe('memory command interception', () => {
