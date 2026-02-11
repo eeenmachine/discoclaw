@@ -4,9 +4,9 @@
 
 # Discoclaw
 
-A Discord-based personal assistant and workspace powered by AI.
+A Discord-native AI workspace built on three pillars: **Memory**, **Beads**, and **Crons**.
 
-Discoclaw turns a private Discord server into a customizable AI workspace. Talk to your assistant in channels and DMs, give it per-channel context, schedule recurring tasks, track work with a built-in issue tracker, and let it take actions in your server — all through natural conversation.
+Discoclaw turns a private Discord server into a persistent AI workspace. Your assistant remembers you across sessions, tracks work in forum threads, and runs scheduled tasks autonomously — all through natural conversation.
 
 It's designed for a single user on a fresh, private server — your own sandbox. Not a shared bot, not a multi-user platform. Just you and your assistant in a space you control.
 
@@ -14,28 +14,43 @@ No gateways, no proxies, no web UI to deploy — Discord *is* the interface. Run
 
 The codebase is intentionally small — small enough to read, audit, and modify directly. Customization means changing the code, not configuring a plugin system.
 
-## Personal assistant
+## Why Discord?
 
-Your assistant lives in Discord and knows who you are.
+Discord gives you channels, forum threads, DMs, mobile access, and rich formatting for free. Discoclaw maps its three core features onto Discord primitives so there's nothing extra to learn — channels become context boundaries, forum threads become task cards and job definitions, and conversation history is the raw material for memory.
 
-- **Memory** — Remembers facts you tell it across sessions (`!memory remember ...`) and injects them into every conversation
-- **Rolling summaries** — Automatically compresses earlier conversation into a summary so context carries forward, even across restarts
-- **Per-channel context** — Each channel gets its own markdown file describing how the assistant should behave there (formal in #work, casual in #random)
-- **Customizable identity** — Define your assistant's personality, name, and values through workspace files (`SOUL.md`, `IDENTITY.md`, etc.)
+## Memory — the bot knows you
+
+Your assistant carries context across every conversation, channel, and restart.
+
+- **Durable facts** — `!memory remember prefers dark mode` persists across sessions and channels
+- **Rolling summaries** — Compresses earlier conversation so context carries forward, even across restarts
+- **Per-channel context** — Each channel gets a markdown file shaping behavior (formal in #work, casual in #random)
+- **Customizable identity** — Personality, name, and values defined in workspace files (`SOUL.md`, `IDENTITY.md`, etc.)
 - **Group chat aware** — Knows when to speak up and when to stay quiet in shared channels
-- **Scheduled tasks** — Describe a recurring task in a forum thread ("every weekday at 7am, check the weather and post to #general") and it runs on schedule
 
-## Workspace
+**Why Discord fits:** channels = context boundaries, DMs = private deep context, conversation history is the raw material.
 
-Your assistant has a persistent working directory with real tools.
+## Beads — the bot tracks your work
 
-- **File access** — Read, write, and organize files in a dedicated workspace directory
-- **Web access** — Search the web, fetch pages, and pull in information
-- **Browser automation** — Connect to a real browser session for tasks that need it
-- **Discord actions** — Your assistant can manage your server: create channels, send messages, search history, create threads, run polls, manage roles, and more — each category gated behind its own feature flag
-- **Multi-turn sessions** — A live process persists between messages, so file reads, edits, and tool results carry across turns instead of starting fresh every time
-- **Cron jobs** — Define scheduled tasks as forum threads in plain language; edit to change, archive to pause, unarchive to resume
-- **Task tracking** — Built-in task tracking via [beads](https://github.com/qwibitai/beads), a lightweight issue tracker; create, update, and close tasks from Discord or the terminal, synced to forum threads
+A lightweight issue tracker ([beads](https://github.com/qwibitai/beads)) that syncs bidirectionally with Discord forum threads.
+
+- **Create from either side** — `bd add "fix login bug"` in the terminal or ask your assistant in chat
+- **Bidirectional sync** — Status, priority, and tags stay in sync between the CLI and Discord threads
+- **Status emoji and auto-tagging** — Thread names show live status at a glance
+- **Discord actions** — Your assistant manages tasks through conversation: create channels, send messages, search history, run polls, and more
+
+**Why Discord fits:** forum threads = task cards, archive = done, thread names show live status.
+
+## Crons — the bot acts on its own
+
+Recurring tasks defined as forum threads in plain language — no crontab, no separate scheduler UI.
+
+- **Plain-language schedules** — "every weekday at 7am, check the weather and post to #general"
+- **Edit to change, archive to pause, unarchive to resume**
+- **Full workspace access** — File I/O, web search, browser automation, Discord actions
+- **Multi-turn sessions** — A live process persists between runs, so context carries across executions
+
+**Why Discord fits:** forum threads = job definitions, archive/unarchive = pause/resume, no separate scheduler UI needed.
 
 ## How it works
 
