@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import { ChannelType } from 'discord.js';
 import type { CategoryChannel, Client, ForumChannel, Guild, GuildBasedChannel } from 'discord.js';
 import type { LoggerLike } from './action-types.js';
+import { stripCountSuffix } from './forum-count-sync.js';
 
 export type SystemScaffold = {
   guildId: string;
@@ -15,7 +16,7 @@ function norm(s: string): string {
   return (s ?? '').trim().toLowerCase();
 }
 
-function isSnowflake(s: string): boolean {
+export function isSnowflake(s: string): boolean {
   return /^\d{8,}$/.test((s ?? '').trim());
 }
 
@@ -58,8 +59,14 @@ function findByNameAndType(
   type: ChannelType,
 ): GuildBasedChannel | null {
   const want = norm(name);
-  const ch = guild.channels.cache.find((c) => c.type === type && norm(c.name) === want);
-  return (ch as GuildBasedChannel) ?? null;
+  // Pass 1: exact name match.
+  const exact = guild.channels.cache.find((c) => c.type === type && norm(c.name) === want);
+  if (exact) return (exact as GuildBasedChannel);
+  // Pass 2: match after stripping count suffix (defense-in-depth).
+  const stripped = guild.channels.cache.find((c) =>
+    c.type === type && norm(stripCountSuffix(c.name)) === want,
+  );
+  return (stripped as GuildBasedChannel) ?? null;
 }
 
 function findAnyByName(
@@ -116,7 +123,36 @@ async function ensureChild(
   parentCategoryId: string,
   spec: { name: string; type: ChannelType.GuildText | ChannelType.GuildForum; topic?: string },
   log?: LoggerLike,
+  existingId?: string,
 ): Promise<{ id?: string; created: boolean; moved: boolean }> {
+  // ID-first lookup when configured.
+  if (existingId && isSnowflake(existingId)) {
+    const byId = guild.channels.cache.get(existingId) ?? await tryFetchChannel(guild, existingId);
+    if (byId) {
+      if (byId.type !== spec.type) {
+        log?.error(
+          { existingId, name: spec.name, expected: ChannelType[spec.type], actual: ChannelType[byId.type] },
+          'system-bootstrap: configured ID has wrong channel type',
+        );
+        return { created: false, moved: false }; // fail closed — no ID returned
+      }
+      const moved = await moveUnderCategory(byId, parentCategoryId, log);
+      // Reconcile topic if it differs from expected.
+      if (spec.topic && (byId as any).topic !== spec.topic) {
+        try {
+          await (byId as any).edit({ topic: spec.topic });
+          log?.info({ name: spec.name }, 'system-bootstrap: reconciled topic');
+        } catch (err) {
+          log?.warn({ err, name: spec.name }, 'system-bootstrap: failed to reconcile topic');
+        }
+      }
+      return { id: String((byId as any).id ?? ''), created: false, moved };
+    }
+    // ID not found anywhere — fail closed.
+    log?.error({ existingId, name: spec.name }, 'system-bootstrap: configured channel ID not found in guild');
+    return { created: false, moved: false }; // no ID returned, no creation
+  }
+
   const exact = findByNameAndType(guild, spec.name, spec.type);
   if (exact) {
     const moved = await moveUnderCategory(exact, parentCategoryId, log);
@@ -156,7 +192,7 @@ async function ensureChild(
 }
 
 export async function ensureSystemScaffold(
-  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string },
+  params: { guild: Guild; ensureBeads: boolean; botDisplayName?: string; existingCronsId?: string; existingBeadsId?: string },
   log?: LoggerLike,
 ): Promise<SystemScaffold | null> {
   const { guild, ensureBeads } = params;
@@ -181,6 +217,7 @@ export async function ensureSystemScaffold(
     system.id,
     { name: 'crons', type: ChannelType.GuildForum, topic: 'Cron jobs are managed by the bot. Use bot commands to create scheduled tasks. Do not create threads manually — they will be archived.' },
     log,
+    params.existingCronsId,
   );
   if (crons.created) created.push('crons');
   if (crons.moved) moved.push('crons');
@@ -192,6 +229,7 @@ export async function ensureSystemScaffold(
       system.id,
       { name: 'beads', type: ChannelType.GuildForum, topic: 'Beads are managed by the bot. Use bead commands or the bd CLI to create tasks. Do not create threads manually — they will be archived.' },
       log,
+      params.existingBeadsId,
     );
     if (beads.created) created.push('beads');
     if (beads.moved) moved.push('beads');

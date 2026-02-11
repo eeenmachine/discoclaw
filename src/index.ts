@@ -26,7 +26,7 @@ import { ensureWorkspaceBootstrapFiles } from './workspace-bootstrap.js';
 import { probeWorkspacePermissions } from './workspace-permissions.js';
 import { loadRunStats } from './cron/run-stats.js';
 import { seedTagMap } from './cron/discord-sync.js';
-import { ensureForumTags } from './discord/system-bootstrap.js';
+import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -380,6 +380,8 @@ const botParams = {
   shortTermInjectMaxChars,
   statusChannel,
   bootstrapEnsureBeadsForum: beadsEnabled && bdAvailable,
+  existingCronsId: isSnowflake(cronForum ?? '') ? cronForum : undefined,
+  existingBeadsId: isSnowflake(beadsForum) ? beadsForum : undefined,
   toolAwareStreaming,
   actionFollowupDepth,
   reactionHandlerEnabled,

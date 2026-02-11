@@ -109,6 +109,8 @@ export type BotParams = {
   botActivityType?: 'Playing' | 'Listening' | 'Watching' | 'Competing' | 'Custom';
   botAvatar?: string;
   appendSystemPrompt?: string;
+  existingCronsId?: string;
+  existingBeadsId?: string;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -976,7 +978,7 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
     const guild = selectBootstrapGuild(client, params.guildId, params.log);
     if (guild) {
       system = await ensureSystemScaffold(
-        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum), botDisplayName: params.botDisplayName },
+        { guild, ensureBeads: Boolean(params.bootstrapEnsureBeadsForum), botDisplayName: params.botDisplayName, existingCronsId: params.existingCronsId, existingBeadsId: params.existingBeadsId },
         params.log,
       );
     }

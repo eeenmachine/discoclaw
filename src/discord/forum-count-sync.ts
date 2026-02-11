@@ -7,7 +7,13 @@ import type { LoggerLike } from './action-types.js';
 
 /** Strip a trailing ` ・ N` or legacy ` (N)` count suffix from a forum channel name. */
 export function stripCountSuffix(name: string): string {
-  return name.replace(/\s*(?:・\s*\d+|\(\d+\))$/, '');
+  // Strip structured suffix first (katakana dot or parens).
+  let result = name.replace(/\s*(?:・\s*\d+|\(\d+\))$/, '');
+  // Then strip Discord-slugified suffix (e.g. "beads-6" from "beads (6)").
+  // Greedy: a forum named "tasks-3" loses the "-3". Acceptable since
+  // count sync is the only thing that sets these suffixed names.
+  result = result.replace(/-\d+$/, '');
+  return result;
 }
 
 // ---------------------------------------------------------------------------

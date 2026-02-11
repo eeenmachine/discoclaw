@@ -297,6 +297,18 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
 
+  const cronEnabled = parseBoolean(env, 'DISCOCLAW_CRON_ENABLED', true);
+  const cronForum = parseTrimmedString(env, 'DISCOCLAW_CRON_FORUM');
+  if (cronEnabled && (!cronForum || !/^\d{8,}$/.test(cronForum))) {
+    throw new Error('DISCOCLAW_CRON_FORUM must be a Discord channel ID (snowflake) when crons are enabled');
+  }
+
+  const beadsEnabled = parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true);
+  const beadsForum = parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM');
+  if (beadsEnabled && (!beadsForum || !/^\d{8,}$/.test(beadsForum))) {
+    throw new Error('DISCOCLAW_BEADS_FORUM must be a Discord channel ID (snowflake) when beads are enabled');
+  }
+
   return {
     config: {
       token,
@@ -369,8 +381,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       statusChannel: parseTrimmedString(env, 'DISCOCLAW_STATUS_CHANNEL'),
       guildId: parseTrimmedString(env, 'DISCORD_GUILD_ID'),
 
-      cronEnabled: parseBoolean(env, 'DISCOCLAW_CRON_ENABLED', true),
-      cronForum: parseTrimmedString(env, 'DISCOCLAW_CRON_FORUM'),
+      cronEnabled,
+      cronForum,
       cronModel: parseTrimmedString(env, 'DISCOCLAW_CRON_MODEL') ?? 'haiku',
       cronAutoTag: parseBoolean(env, 'DISCOCLAW_CRON_AUTO_TAG', false),
       cronAutoTagModel: parseTrimmedString(env, 'DISCOCLAW_CRON_AUTO_TAG_MODEL') ?? 'haiku',
@@ -381,9 +393,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       groupsDirOverride: parseTrimmedString(env, 'GROUPS_DIR'),
       useGroupDirCwd: parseBoolean(env, 'USE_GROUP_DIR_CWD', false),
 
-      beadsEnabled: parseBoolean(env, 'DISCOCLAW_BEADS_ENABLED', true),
+      beadsEnabled,
       beadsCwdOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_CWD'),
-      beadsForum: parseTrimmedString(env, 'DISCOCLAW_BEADS_FORUM'),
+      beadsForum,
       beadsTagMapPathOverride: parseTrimmedString(env, 'DISCOCLAW_BEADS_TAG_MAP'),
       beadsMentionUser: parseTrimmedString(env, 'DISCOCLAW_BEADS_MENTION_USER'),
       beadsSidebar: parseBoolean(env, 'DISCOCLAW_BEADS_SIDEBAR', false),

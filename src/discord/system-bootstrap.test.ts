@@ -93,6 +93,139 @@ describe('ensureSystemScaffold', () => {
     // 4 creates: category + status + crons + beads
     expect(guild.__create).toHaveBeenCalledTimes(4);
   });
+
+  it('finds renamed forum by existingId and does NOT create a duplicate', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: '1467563223590113333', name: 'beads-6', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: '1470920350723342503', name: 'crons ・ 1', type: ChannelType.GuildForum, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureBeads: true,
+      existingCronsId: '1470920350723342503',
+      existingBeadsId: '1467563223590113333',
+    });
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('1470920350723342503');
+    expect(res?.beadsForumId).toBe('1467563223590113333');
+    // No new channels should have been created (only category existed already).
+    expect(guild.__create).not.toHaveBeenCalled();
+  });
+
+  it('returns no ID and does NOT create when existingId has wrong channel type (fail closed)', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      // crons ID points to a text channel, not a forum.
+      { id: '1470920350723342503', name: 'crons', type: ChannelType.GuildText, parentId: 'cat-sys' },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureBeads: false,
+      existingCronsId: '1470920350723342503',
+    }, log as any);
+    expect(res).not.toBeNull();
+    // cronsForumId should be undefined because the type was wrong.
+    expect(res?.cronsForumId).toBeUndefined();
+    // Should have logged an error about wrong type.
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ existingId: '1470920350723342503' }),
+      expect.stringContaining('wrong channel type'),
+    );
+    // Should NOT have created a new crons forum.
+    const createCalls = guild.__create.mock.calls;
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'crons');
+    expect(cronCreateCalls).toHaveLength(0);
+  });
+
+  it('returns no ID when existingId is not found anywhere (fail closed, stale ID)', async () => {
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureBeads: false,
+      existingCronsId: '9999999999999999999',
+    }, log as any);
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBeUndefined();
+    // Should have logged error about not found.
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ existingId: '9999999999999999999' }),
+      expect.stringContaining('not found in guild'),
+    );
+    // Should NOT have created a new crons forum.
+    const createCalls = guild.__create.mock.calls;
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'crons');
+    expect(cronCreateCalls).toHaveLength(0);
+  });
+
+  it('finds channel by existingId via API fetch when not in cache', async () => {
+    // Guild starts with only System category and status in cache.
+    // The crons forum is NOT in cache but fetch() will return it.
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    // Simulate: the channel exists on Discord but isn't in the local cache.
+    // Override fetch to return a channel object for the crons ID.
+    const cronsChannel = {
+      id: '1470920350723342503',
+      name: 'crons ・ 3',
+      type: ChannelType.GuildForum,
+      parentId: null,
+      setParent: vi.fn(async function (this: any, pid: string) { this.parentId = pid; }),
+      edit: vi.fn(async function (this: any, opts: any) { if ('parent' in opts) this.parentId = opts.parent; }),
+    };
+    guild.channels.fetch = vi.fn(async (id: string) => {
+      if (id === '1470920350723342503') return cronsChannel;
+      return null;
+    });
+
+    const res = await ensureSystemScaffold({
+      guild,
+      ensureBeads: false,
+      existingCronsId: '1470920350723342503',
+    });
+    expect(res).not.toBeNull();
+    expect(res?.cronsForumId).toBe('1470920350723342503');
+    // fetch should have been called with the ID.
+    expect(guild.channels.fetch).toHaveBeenCalledWith('1470920350723342503');
+    // Should NOT have created a new crons forum.
+    expect(guild.__create).not.toHaveBeenCalled();
+  });
+
+  it('findByNameAndType: exact match takes precedence over stripped match', async () => {
+    // Both "crons" and "crons ・ 1" exist — searching for "crons" should find the exact match.
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'crons-exact', name: 'crons', type: ChannelType.GuildForum },
+      { id: 'crons-suffixed', name: 'crons ・ 1', type: ChannelType.GuildForum },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    expect(res?.cronsForumId).toBe('crons-exact');
+  });
+
+  it('findByNameAndType: count-suffixed name matches search for base name', async () => {
+    // Only "crons ・ 1" exists (no exact "crons") — should match via stripped suffix.
+    const guild = makeMockGuild([
+      { id: 'cat-sys', name: 'System', type: ChannelType.GuildCategory },
+      { id: 'crons-suffixed', name: 'crons ・ 1', type: ChannelType.GuildForum },
+      { id: 'status-1', name: 'status', type: ChannelType.GuildText, parentId: 'cat-sys' },
+    ]);
+    const res = await ensureSystemScaffold({ guild, ensureBeads: false });
+    expect(res?.cronsForumId).toBe('crons-suffixed');
+    // Should NOT have created a new crons forum.
+    const createCalls = guild.__create.mock.calls;
+    const cronCreateCalls = createCalls.filter((c: any) => c[0]?.name === 'crons');
+    expect(cronCreateCalls).toHaveLength(0);
+  });
 });
 
 describe('ensureForumTags', () => {

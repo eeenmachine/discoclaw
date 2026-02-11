@@ -43,6 +43,18 @@ describe('stripCountSuffix', () => {
   it('handles multiple spaces around separator', () => {
     expect(stripCountSuffix('beads  ・  5')).toBe('beads');
   });
+
+  it('strips Discord-slugified suffix "beads-6"', () => {
+    expect(stripCountSuffix('beads-6')).toBe('beads');
+  });
+
+  it('strips slugified suffix from multi-dash name "my-cool-forum-12"', () => {
+    expect(stripCountSuffix('my-cool-forum-12')).toBe('my-cool-forum');
+  });
+
+  it('strips mixed corruption "beads-6 ・ 5" back to base name', () => {
+    expect(stripCountSuffix('beads-6 ・ 5')).toBe('beads');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -210,6 +222,22 @@ describe('ForumCountSync', () => {
     channel.setName = vi.fn(async () => {});
     await vi.advanceTimersByTimeAsync(30_000); // retry_after fires
 
+    expect(channel.setName).toHaveBeenCalledWith('beads ・ 5');
+
+    sync.stop();
+  });
+
+  it('recovers base name from slugified channel name "beads-6"', async () => {
+    const channel = mockChannel('beads-6');
+    const client = makeClient(channel);
+    const countFn = vi.fn(() => 5);
+
+    const sync = new ForumCountSync(client, 'forum-1', countFn);
+
+    sync.requestUpdate();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(channel.setName).toHaveBeenCalledTimes(1);
     expect(channel.setName).toHaveBeenCalledWith('beads ・ 5');
 
     sync.stop();
