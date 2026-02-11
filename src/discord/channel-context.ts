@@ -204,6 +204,25 @@ export async function loadDiscordChannelContext(opts: {
       '',
     ].join('\n'),
   );
+  await writeFileIfMissing(
+    path.join(baseDir, 'self-awareness.md'),
+    [
+      '# Discord Base Context (Self-Awareness)',
+      '',
+      'You are a Discoclaw bot — a Discord-to-AI bridge that routes messages to an AI runtime.',
+      '',
+      'Key facts about your architecture:',
+      '- Your source code is in the repo root (TypeScript, compiled to dist/)',
+      '- Developer docs: CLAUDE.md (root), .context/*.md (on-demand modules)',
+      '- Your base context files (including this one) live in content/discord/base/',
+      '- Per-channel context files live in content/discord/channels/',
+      '- Your workspace and identity files (SOUL.md, IDENTITY.md, etc.) are in workspace/',
+      '',
+      'For architecture details, read: .context/architecture.md',
+      'For your behavioral rules, read: the other base context files loaded alongside this one.',
+      '',
+    ].join('\n'),
+  );
 
   // Load all .md files from base/ so new context files are picked up automatically.
   const baseEntries = await fs.readdir(baseDir);
