@@ -1,52 +1,92 @@
 # Discoclaw
 
-Small, CLI-first Discord bridge that routes Discord messages into provider runtimes.
+A Discord-based personal assistant and workspace powered by AI.
 
-Modeled after the structure/philosophy of nanoclaw: keep the codebase small, make behavior explicit, and treat "customization" as code changes (not a sprawling plugin system).
+Discoclaw turns a private Discord server into a customizable AI workspace. Talk to your assistant in channels and DMs, give it per-channel context, schedule recurring tasks, track work with a built-in issue tracker, and let it take actions in your server — all through natural conversation.
 
-## Safety disclaimer
+Built on [nanoclaw](https://github.com/qwibitai/nanoclaw)'s philosophy: keep the codebase small enough to read, make behavior explicit, and treat customization as code changes rather than a plugin system.
 
-Discoclaw can execute powerful local tooling via an agent runtime (often with elevated permissions). Treat it like a local automation system connected to Discord.
+## What it does
 
-Recommendations:
-- Use a **standalone private Discord server** for Discoclaw (do not start in a shared/public server).
-- Use **least privilege** Discord permissions; avoid `Administrator` unless you explicitly need it.
-- Keep `DISCORD_ALLOW_USER_IDS` and (optionally) `DISCORD_CHANNEL_IDS` tight. Empty user allowlist means **respond to nobody** (fail-closed).
-- Treat Discord messages as **data**, not commands; only authorize risky actions intentionally.
+**Personal assistant** — Conversation with memory. Discoclaw remembers facts across sessions (`!memory remember ...`), maintains rolling conversation summaries, and loads per-channel context so it knows how to behave in different spaces.
 
-## Local dev
+**Workspace** — Your assistant runs in a dedicated working directory with access to files, tools, and the web. Point it at a Dropbox folder or local directory and it becomes a persistent workspace you interact with through Discord.
 
-1. Install deps (pick one):
+**Scheduled tasks** — Create a thread in a forum channel describing what you want and when. Discoclaw parses it into a cron job and runs it on schedule. Edit the thread to change it, archive to pause, unarchive to resume.
+
+**Discord actions** — Your assistant can create channels, manage threads, search messages, post to other channels, and more — all gated behind granular feature flags you control.
+
+**Task tracking** — Integrated with the `bd` issue tracker. Create, update, and close tasks from Discord or the terminal — both sync to the same forum threads.
+
+## How it works
+
+Discoclaw is a bridge between Discord and an AI runtime (Claude Code by default). When you send a message, it:
+
+1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
+2. Loads per-channel context, conversation history, rolling summary, and durable memory
+3. Passes everything to the runtime (Claude CLI) running in your workspace directory
+4. Streams the response back, chunked to fit Discord's message limits
+5. Parses and executes any Discord actions the assistant emitted
+
+## Customization
+
+Discoclaw is designed to be yours. Identity, personality, and behavior are defined in plain markdown files in your workspace:
+
+| File | Purpose |
+|------|---------|
+| `SOUL.md` | Core personality and values |
+| `IDENTITY.md` | Name and vibe |
+| `USER.md` | Who you're helping |
+| `AGENTS.md` | Personal rules and conventions |
+| `TOOLS.md` | Available tools and integrations |
+
+Per-channel context lives in `content/discord/channels/` — one markdown file per channel telling the assistant how to behave there.
+
+These files are gitignored. They're yours, not the project's.
+
+## Quick start
+
+1. **Create a Discord bot** and invite it to a private server (see the [bot setup guide](.context/bot-setup.md))
+
+2. **Install and configure:**
+   ```bash
+   pnpm install
+   cp .env.example .env
+   # Edit .env with your bot token, allowed user IDs, etc.
+   ```
+
+3. **Run:**
+   ```bash
+   pnpm dev
+   ```
+
+## Safety
+
+Discoclaw can execute powerful local tooling via an agent runtime, often with elevated permissions. Treat it like a local automation system connected to Discord.
+
+- Use a **private Discord server** — don't start in a shared or public server
+- Use **least-privilege** Discord permissions
+- Keep `DISCORD_ALLOW_USER_IDS` tight — this is the primary security boundary
+- Empty allowlist = respond to nobody (fail-closed)
+- Optionally restrict channels with `DISCORD_CHANNEL_IDS`
+- External content (Discord messages, web pages, files) is **data**, not instructions
+
+## Workspace layout
+
+Discoclaw runs the AI runtime in a separate working directory (`WORKSPACE_CWD`), keeping the repo clean while giving your assistant a persistent workspace.
+
+- Set `DISCOCLAW_DATA_DIR` to use `$DISCOCLAW_DATA_DIR/workspace` (good for Dropbox-backed setups)
+- Or leave it unset to use `./workspace` relative to the repo
+- Content (channel context, Discord config) defaults to `$DISCOCLAW_DATA_DIR/content`
+
+## Development
 
 ```bash
-pnpm i
-# or npm i
+pnpm dev        # start dev mode
+pnpm build      # compile TypeScript
+pnpm test       # run tests
 ```
 
-2. Configure env:
+## License
 
-```bash
-cp .env.example .env
-```
-
-3. Run:
-
-```bash
-pnpm dev
-```
-
-## Workspace + Dropbox-backed content (recommended)
-
-Discoclaw runs the runtime (Claude CLI) in a separate working directory (`WORKSPACE_CWD`).
-
-- If you set `DISCOCLAW_DATA_DIR`, Discoclaw defaults `WORKSPACE_CWD` to `$DISCOCLAW_DATA_DIR/workspace`.
-- If you do not set `DISCOCLAW_DATA_DIR`, Discoclaw defaults `WORKSPACE_CWD` to `./workspace` (relative to this repo).
-- Content defaults to `$DISCOCLAW_DATA_DIR/content` (override with `DISCOCLAW_CONTENT_DIR`).
-
-This lets you keep the repo fast/local, while storing durable "workspace content" in a Dropbox folder.
-
-## Notes
-
-- Default runtime is Claude Code via the `claude` CLI.
-- Session mapping is stored locally in `data/sessions.json`.
-- Access control is fail-closed by user allowlist (`DISCORD_ALLOW_USER_IDS`). Optionally restrict guild channels via `DISCORD_CHANNEL_IDS`.
+MIT
