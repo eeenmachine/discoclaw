@@ -8,6 +8,23 @@ import type { BeadData, BeadCreateParams, BeadUpdateParams, BeadListParams } fro
 const BD_BIN = process.env.BD_BIN || 'bd';
 
 // ---------------------------------------------------------------------------
+// Legacy status normalization
+// ---------------------------------------------------------------------------
+
+/** Map removed statuses to their replacement. */
+const LEGACY_STATUS_MAP: Record<string, BeadData['status']> = {
+  done: 'closed',
+  tombstone: 'closed',
+};
+
+/** Normalize legacy bead statuses (`done`, `tombstone`) → `closed`. */
+export function normalizeBeadData(bead: BeadData): BeadData {
+  const mapped = LEGACY_STATUS_MAP[bead.status as string];
+  if (mapped) return { ...bead, status: mapped };
+  return bead;
+}
+
+// ---------------------------------------------------------------------------
 // JSON parsing helper
 // ---------------------------------------------------------------------------
 
@@ -88,7 +105,7 @@ export async function bdShow(id: string, cwd: string): Promise<BeadData | null> 
   try {
     const stdout = await runBd(['show', '--json', id], cwd);
     const items = parseBdJson<BeadData>(stdout);
-    return items[0] ?? null;
+    return items[0] ? normalizeBeadData(items[0]) : null;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/not found/i.test(msg)) return null;
@@ -110,7 +127,7 @@ export async function bdList(params: BeadListParams, cwd: string): Promise<BeadD
   const stdout = await runBd(args, cwd);
   const items = parseBdJson<BeadData>(stdout);
 
-  return items;
+  return items.map(normalizeBeadData);
 }
 
 /** Create a new bead. Returns the created bead data. */

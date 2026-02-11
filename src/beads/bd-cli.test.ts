@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { parseBdJson } from './bd-cli.js';
+import { parseBdJson, normalizeBeadData } from './bd-cli.js';
+import type { BeadData } from './types.js';
 
 // ---------------------------------------------------------------------------
 // parseBdJson
@@ -56,4 +57,42 @@ describe('parseBdJson', () => {
     expect(parseBdJson('42')).toEqual([]);
     expect(parseBdJson('null')).toEqual([]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeBeadData
+// ---------------------------------------------------------------------------
+
+describe('normalizeBeadData', () => {
+  const baseBead: BeadData = {
+    id: 'ws-001',
+    title: 'Test bead',
+    status: 'open',
+  };
+
+  it('maps "done" → "closed"', () => {
+    const bead = { ...baseBead, status: 'done' as BeadData['status'] };
+    expect(normalizeBeadData(bead).status).toBe('closed');
+  });
+
+  it('maps "tombstone" → "closed"', () => {
+    const bead = { ...baseBead, status: 'tombstone' as BeadData['status'] };
+    expect(normalizeBeadData(bead).status).toBe('closed');
+  });
+
+  it('does not mutate the original bead when mapping', () => {
+    const bead = { ...baseBead, status: 'done' as BeadData['status'] };
+    normalizeBeadData(bead);
+    expect(bead.status).toBe('done');
+  });
+
+  it.each(['open', 'in_progress', 'blocked', 'closed'] as const)(
+    'passes through valid status "%s" unchanged',
+    (status) => {
+      const bead = { ...baseBead, status };
+      const result = normalizeBeadData(bead);
+      expect(result.status).toBe(status);
+      expect(result).toBe(bead); // same reference — no copy
+    },
+  );
 });
