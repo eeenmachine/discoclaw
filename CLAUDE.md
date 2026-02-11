@@ -58,9 +58,14 @@ After completing a unit of work:
 
 Skip deploy for test-only, docs-only, or template-only changes.
 
+## Formatting
+
+- Display shell commands in standalone fenced codeblocks for easy copy-paste.
+
 ## Commands
 
 ```bash
+pnpm doctor     # preflight check (Node, pnpm, Claude CLI, .env)
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

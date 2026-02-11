@@ -25,6 +25,7 @@ import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import { createReactionAddHandler } from './discord/reaction-handler.js';
 
 export type BotParams = {
   token: string;
@@ -77,6 +78,8 @@ export type BotParams = {
   bootstrapEnsureBeadsForum?: boolean;
   toolAwareStreaming?: boolean;
   actionFollowupDepth: number;
+  reactionHandlerEnabled: boolean;
+  reactionMaxAgeMs: number;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'>;
@@ -267,6 +270,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       // Default = 0, Reply = 19; everything else is a system message.
       const t = msg.type;
       if (t != null && t !== 0 && t !== 19) return;
+
+      // Heuristic: detect missing Message Content Intent.
+      // If a guild message arrives with empty content but no attachments, stickers,
+      // or embeds, and mentions the bot, the intent is likely not enabled.
+      if (
+        msg.guildId != null &&
+        !msg.content &&
+        (!msg.attachments || msg.attachments.size === 0) &&
+        (!msg.stickers || msg.stickers.size === 0) &&
+        (!msg.embeds || msg.embeds.length === 0) &&
+        msg.mentions?.has(msg.client.user)
+      ) {
+        params.log?.warn(
+          { channelId: msg.channelId, authorId: msg.author.id },
+          'Received empty message content in guild — is Message Content Intent enabled in the Developer Portal?',
+        );
+      }
 
       if (!isAllowlisted(params.allowUserIds, msg.author.id)) return;
 
@@ -755,8 +775,12 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.DirectMessages,
+      ...(params.reactionHandlerEnabled ? [GatewayIntentBits.GuildMessageReactions] : []),
     ],
-    partials: [Partials.Channel],
+    partials: [
+      Partials.Channel,
+      ...(params.reactionHandlerEnabled ? [Partials.Message, Partials.Reaction, Partials.User] : []),
+    ],
   });
 
   // Mutable ref: handler captures this at registration time, but dereferences
@@ -765,6 +789,10 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
 
   const queue = new KeyedQueue();
   client.on('messageCreate', createMessageCreateHandler(params, queue, statusRef));
+
+  if (params.reactionHandlerEnabled) {
+    client.on('messageReactionAdd', createReactionAddHandler(params, queue, statusRef));
+  }
 
   if (params.autoJoinThreads) {
     client.on('threadCreate', async (thread: any) => {
