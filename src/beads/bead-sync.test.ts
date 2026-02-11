@@ -252,27 +252,6 @@ describe('runBeadSync', () => {
     expect(result.threadsArchived).toBe(0);
   });
 
-  it('archives threads for tombstone beads in phase 4', async () => {
-    const { bdList } = await import('./bd-cli.js');
-    const { closeBeadThread } = await import('./discord-sync.js');
-
-    (bdList as any).mockResolvedValueOnce([
-      { id: 'ws-007', title: 'G', status: 'tombstone', labels: [], external_ref: 'discord:777' },
-    ]);
-
-    const result = await runBeadSync({
-      client: makeClient(),
-      guild: makeGuild(),
-      forumId: 'forum',
-      tagMap: {},
-      beadsCwd: '/tmp',
-      throttleMs: 0,
-    } as any);
-
-    expect(closeBeadThread).toHaveBeenCalledWith(expect.anything(), '777', expect.objectContaining({ id: 'ws-007', status: 'tombstone' }));
-    expect(result.threadsArchived).toBe(1);
-  });
-
   it('calls statusPoster.beadSyncComplete with the result when provided', async () => {
     const { bdList } = await import('./bd-cli.js');
     (bdList as any).mockResolvedValueOnce([]);

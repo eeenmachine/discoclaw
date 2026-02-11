@@ -25,9 +25,9 @@ See `discord.md` §Beads for the Discord integration side.
 | `closed_at?` | `string` | |
 | `close_reason?` | `string` | |
 
-**Statuses:** `open` | `in_progress` | `blocked` | `closed` | `done` | `tombstone`
+**Statuses:** `open` | `in_progress` | `blocked` | `closed`
 
-**Status emoji:** open=🟢 in_progress=🟡 blocked=🚫 closed/done=✅ tombstone=🪦
+**Status emoji:** open=🟢 in_progress=🟡 blocked=⚠️ closed=☑️
 
 ## CLI (`bd`)
 
@@ -53,7 +53,7 @@ Full sync runs on startup, on file-watcher trigger, and via `beadSync` action. A
 | 1. Create missing | Open beads without `external_ref` (and without `no-thread` label) get forum threads. Dedupes against existing threads before creating. |
 | 2. Fix mismatches | Open beads with `waiting-*` or `blocked-*` labels get status set to `blocked`. |
 | 3. Sync names/starters | Active beads: unarchive if needed, update thread name (`{emoji} [{shortId}] {title}`), update starter message with metadata. |
-| 4. Archive closed | Closed/done/tombstone beads: post close summary, rename thread, archive. |
+| 4. Archive closed | Closed beads: post close summary, rename thread, archive. |
 
 Throttled at 250ms between API calls. Auto-triggered syncs are silent; only explicit `beadSync` posts to the status channel.
 

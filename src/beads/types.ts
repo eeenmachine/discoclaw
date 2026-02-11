@@ -7,8 +7,6 @@ export const BEAD_STATUSES = [
   'in_progress',
   'blocked',
   'closed',
-  'done',
-  'tombstone',
 ] as const;
 
 export type BeadStatus = (typeof BEAD_STATUSES)[number];
@@ -80,8 +78,6 @@ export type TagMap = Record<string, string>;
 export const STATUS_EMOJI: Record<string, string> = {
   open: '\u{1F7E2}',          // 🟢
   in_progress: '\u{1F7E1}',   // 🟡
-  blocked: '\u{1F6AB}',       // 🚫
-  closed: '\u2705',            // ✅
-  done: '\u2705',              // ✅
-  tombstone: '\u{1FAA6}',     // 🪦
+  blocked: '\u26A0\uFE0F',    // ⚠️
+  closed: '\u2611\uFE0F',      // ☑️
 };

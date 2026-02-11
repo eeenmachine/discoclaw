@@ -19,12 +19,12 @@ describe('buildThreadName', () => {
 
   it('uses checkmark for closed', () => {
     const name = buildThreadName('ws-003', 'Done task', 'closed');
-    expect(name).toContain('\u2705');
+    expect(name).toContain('\u2611\uFE0F');
   });
 
   it('uses prohibition for blocked', () => {
     const name = buildThreadName('ws-004', 'Blocked task', 'blocked');
-    expect(name).toContain('\u{1F6AB}');
+    expect(name).toContain('\u26A0\uFE0F');
   });
 
   it('truncates long titles to 100 chars total', () => {

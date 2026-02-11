@@ -39,8 +39,8 @@ get_emoji() {
   case "$1" in
     "open") echo "🟢" ;;
     "in_progress") echo "🟡" ;;
-    "blocked") echo "🚫" ;;
-    "closed"|"done") echo "✅" ;;
+    "blocked") echo "⚠️" ;;
+    "closed") echo "☑️" ;;
     *) echo "🟢" ;;
   esac
 }

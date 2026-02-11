@@ -73,8 +73,6 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   const missingRef = allBeads.filter((b) =>
     !getThreadIdFromBead(b) &&
     b.status !== 'closed' &&
-    b.status !== 'done' &&
-    b.status !== 'tombstone' &&
     !hasLabel(b, 'no-thread'),
   );
   for (const bead of missingRef) {
@@ -127,7 +125,7 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
   }
 
   // Phase 3: Sync emoji/names for existing threads.
-  const withRef = allBeads.filter((b) => getThreadIdFromBead(b) && b.status !== 'closed' && b.status !== 'done' && b.status !== 'tombstone');
+  const withRef = allBeads.filter((b) => getThreadIdFromBead(b) && b.status !== 'closed');
   for (const bead of withRef) {
     const threadId = getThreadIdFromBead(bead)!;
     // If archived, unarchive and keep unarchived for active beads.
@@ -157,9 +155,9 @@ export async function runBeadSync(opts: BeadSyncOptions): Promise<BeadSyncResult
     await sleep(throttleMs);
   }
 
-  // Phase 4: Archive threads for closed/done/tombstone beads.
+  // Phase 4: Archive threads for closed beads.
   const closedBeads = allBeads.filter((b) =>
-    (b.status === 'closed' || b.status === 'done' || b.status === 'tombstone') && getThreadIdFromBead(b),
+    b.status === 'closed' && getThreadIdFromBead(b),
   );
   for (const bead of closedBeads) {
     const threadId = getThreadIdFromBead(bead)!;
