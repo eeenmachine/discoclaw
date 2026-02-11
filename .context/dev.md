@@ -9,7 +9,7 @@ pnpm build
 pnpm dev
 ```
 
-**Optional tools:** Install [`agent-browser`](https://github.com/anthropics/agent-browser) if browser automation is needed. It must be on `PATH` for Claude CLI to launch it.
+**Optional tools:** Install [`agent-browser`](https://github.com/anthropics/agent-browser) if browser automation is needed. It must be on `PATH` for Claude CLI to launch it. After installing, run `agent-browser install` to fetch a bundled Chromium (or set `AGENT_BROWSER_EXECUTABLE_PATH` to use a system browser).
 
 ## One-Off: Sync Discord Content
 
