@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="discoclaw_splash.jpg" alt="Discoclaw" width="700" />
+</p>
+
 # Discoclaw
 
 A Discord-based personal assistant and workspace powered by AI.
