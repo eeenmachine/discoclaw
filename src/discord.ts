@@ -381,7 +381,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (existing) {
                 summarySection = existing.summary;
                 if (!turnCounters.has(sessionKey)) {
-                  turnCounters.set(sessionKey, existing.turnsSinceUpdate ?? 0);
+                  const raw = existing.turnsSinceUpdate;
+                  turnCounters.set(sessionKey, typeof raw === 'number' && raw >= 0 ? raw : 0);
                 }
               }
             } catch (err) {
@@ -717,6 +718,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
                   `[${params.botDisplayName}]: ${(processedText || '').slice(0, 500)}`,
               };
+            } else if (summarySection) {
+              // Persist counter progress so restarts resume from last known count.
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              saveSummary(params.summaryDataDir, sessionKey, {
+                summary: summarySection,
+                updatedAt: Date.now(),
+                turnsSinceUpdate: count,
+              });
             }
           }
 
