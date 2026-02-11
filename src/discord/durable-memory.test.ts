@@ -57,6 +57,19 @@ describe('loadDurableMemory', () => {
     const result = await loadDurableMemory(dir, 'bad');
     expect(result).toBeNull();
   });
+
+  it('rejects path traversal in userId', async () => {
+    const dir = await makeTmpDir();
+    await expect(loadDurableMemory(dir, '../evil')).rejects.toThrow(/Invalid userId/);
+  });
+});
+
+describe('saveDurableMemory — path traversal', () => {
+  it('rejects path traversal in userId', async () => {
+    const dir = await makeTmpDir();
+    const store: DurableMemoryStore = { version: 1, updatedAt: 0, items: [] };
+    await expect(saveDurableMemory(dir, '../evil', store)).rejects.toThrow(/Invalid userId/);
+  });
 });
 
 describe('saveDurableMemory', () => {
@@ -102,6 +115,15 @@ describe('deriveItemId', () => {
     const id2 = deriveItemId('fact', 'I prefer TypeScript');
     expect(id1).toBe(id2);
   });
+
+  it('produces different IDs for different kinds with same text', () => {
+    const factId = deriveItemId('fact', 'uses TypeScript');
+    const toolId = deriveItemId('tool', 'uses TypeScript');
+    const prefId = deriveItemId('preference', 'uses TypeScript');
+    expect(factId).not.toBe(toolId);
+    expect(factId).not.toBe(prefId);
+    expect(toolId).not.toBe(prefId);
+  });
 });
 
 describe('addItem', () => {
@@ -113,6 +135,14 @@ describe('addItem', () => {
     expect(result.items[0].text).toBe('User prefers TypeScript');
     expect(result.items[0].status).toBe('active');
     expect(result.items[0].id).toMatch(/^durable-/);
+  });
+
+  it('preserves explicit kind parameter', () => {
+    const store = emptyStore();
+    addItem(store, 'Uses VS Code', { type: 'summary' }, 200, 'tool');
+    expect(store.items).toHaveLength(1);
+    expect(store.items[0].kind).toBe('tool');
+    expect(store.items[0].source.type).toBe('summary');
   });
 
   it('updates existing item with same derived ID (dedup)', () => {
@@ -217,6 +247,15 @@ describe('selectItemsForInjection', () => {
     const items = selectItemsForInjection(store, 80);
     expect(items).toHaveLength(1);
     expect(items[0].id).toBe('a');
+  });
+
+  it('returns empty with maxChars = 0', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'some item', status: 'active', updatedAt: 200 }),
+    );
+    const items = selectItemsForInjection(store, 0);
+    expect(items).toHaveLength(0);
   });
 });
 

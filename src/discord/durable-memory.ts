@@ -8,7 +8,7 @@ export type DurableItem = {
   text: string;
   tags: string[];
   status: 'active' | 'deprecated';
-  source: { type: 'discord' | 'manual'; channelId?: string; messageId?: string };
+  source: { type: 'discord' | 'manual' | 'summary'; channelId?: string; messageId?: string };
   createdAt: number;
   updatedAt: number;
 };
@@ -71,9 +71,10 @@ export function addItem(
   text: string,
   source: DurableItem['source'],
   maxItems: number,
+  kind: DurableItem['kind'] = 'fact',
 ): DurableMemoryStore {
   const now = Date.now();
-  const id = deriveItemId('fact', text);
+  const id = deriveItemId(kind, text);
 
   const existing = store.items.find((item) => item.id === id && item.status === 'active');
   if (existing) {
@@ -86,7 +87,7 @@ export function addItem(
 
   const item: DurableItem = {
     id,
-    kind: 'fact',
+    kind,
     text,
     tags: [],
     status: 'active',

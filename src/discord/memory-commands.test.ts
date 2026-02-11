@@ -146,6 +146,52 @@ describe('handleMemoryCommand', () => {
     expect(result).toBe('No matching items found.');
   });
 
+  it('remember — persists channelId and messageId in source', async () => {
+    const durableDir = await makeTmpDir();
+
+    await handleMemoryCommand(
+      { action: 'remember', args: 'test fact' },
+      baseOpts({ durableDataDir: durableDir, channelId: 'ch42', messageId: 'msg99' }),
+    );
+
+    const raw = await fs.readFile(path.join(durableDir, '12345.json'), 'utf8');
+    const store = JSON.parse(raw) as DurableMemoryStore;
+    expect(store.items[0].source).toEqual({ type: 'manual', channelId: 'ch42', messageId: 'msg99' });
+  });
+
+  it('concurrent remember calls serialize correctly', async () => {
+    const durableDir = await makeTmpDir();
+
+    // Fire off concurrent remember commands
+    const results = await Promise.all([
+      handleMemoryCommand(
+        { action: 'remember', args: 'fact one' },
+        baseOpts({ durableDataDir: durableDir }),
+      ),
+      handleMemoryCommand(
+        { action: 'remember', args: 'fact two' },
+        baseOpts({ durableDataDir: durableDir }),
+      ),
+      handleMemoryCommand(
+        { action: 'remember', args: 'fact three' },
+        baseOpts({ durableDataDir: durableDir }),
+      ),
+    ]);
+
+    expect(results).toEqual([
+      'Remembered: fact one',
+      'Remembered: fact two',
+      'Remembered: fact three',
+    ]);
+
+    // Verify all three ended up on disk
+    const raw = await fs.readFile(path.join(durableDir, '12345.json'), 'utf8');
+    const store = JSON.parse(raw) as DurableMemoryStore;
+    expect(store.items).toHaveLength(3);
+    const texts = store.items.map((it) => it.text).sort();
+    expect(texts).toEqual(['fact one', 'fact three', 'fact two']);
+  });
+
   it('reset-rolling — deletes summary file', async () => {
     const summaryDir = await makeTmpDir();
     await saveSummary(summaryDir, 'discord:dm:12345', {

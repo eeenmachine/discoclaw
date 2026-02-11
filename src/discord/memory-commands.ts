@@ -10,12 +10,7 @@ import {
 } from './durable-memory.js';
 import type { DurableMemoryStore } from './durable-memory.js';
 import { loadSummary } from './summarizer.js';
-import { KeyedQueue } from '../group-queue.js';
-
-// Serialize durable writes per userId. The session queue in discord.ts serializes
-// by sessionKey (channel-scoped), but durable memory is per-user. Without this,
-// concurrent !memory commands from the same user in different channels could race.
-const durableWriteQueue = new KeyedQueue();
+import { durableWriteQueue } from './durable-write-queue.js';
 
 export type MemoryCommand = {
   action: 'show' | 'remember' | 'forget' | 'reset-rolling';
