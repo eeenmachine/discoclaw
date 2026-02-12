@@ -300,6 +300,8 @@ export function createClaudeCliRuntime(opts: ClaudeCliRuntimeOpts): RuntimeAdapt
     }
 
     if (effectiveOutputFormat === 'stream-json') {
+      // --verbose is required when combining --print with --output-format=stream-json.
+      args.push('--verbose');
       args.push('--include-partial-messages');
     }
 

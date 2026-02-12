@@ -87,6 +87,7 @@ export class LongRunningProcess {
   spawn(): boolean {
     const args: string[] = [
       '-p',
+      '--verbose',
       '--input-format', 'stream-json',
       '--output-format', 'stream-json',
       '--include-partial-messages',
