@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
 import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
+import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
 
 function makeMockRuntime(response: string): RuntimeAdapter {
   return {
@@ -843,5 +844,51 @@ describe('streaming behavior', () => {
     expect(replyObj.edit).toHaveBeenCalled();
     const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
     expect(lastCall[0].content).toMatch(/error|unexpected/i);
+  });
+});
+
+describe('in-flight reply registry cleanup', () => {
+  afterEach(() => {
+    resetInFlight();
+  });
+
+  it('no leaked registry entries after normal completion', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries after runtime error', async () => {
+    const params = makeParams({ runtime: makeMockRuntimeError('timeout') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries on handler exception', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        throw new Error('unexpected crash');
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
   });
 });

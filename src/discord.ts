@@ -26,6 +26,7 @@ import { ToolAwareQueue } from './discord/tool-aware-queue.js';
 import { ensureSystemScaffold, selectBootstrapGuild } from './discord/system-bootstrap.js';
 import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import { registerInFlightReply, isShuttingDown } from './discord/inflight-replies.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
@@ -507,6 +508,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let followUpDepth = 0;
           let processedText = '';
 
+          // Track this reply for graceful shutdown cleanup.
+          let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
+          try {
+
           // -- auto-follow-up loop --
           // When query actions (channelList, readMessages, etc.) succeed, re-invoke
           // Claude with the results so it can continue reasoning without user intervention.
@@ -527,12 +532,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
             // On follow-up iterations, send a new placeholder message.
             if (followUpDepth > 0) {
+              dispose();
               reply = await msg.channel.send({ content: formatBoldLabel('(following up...)'), allowedMentions: NO_MENTIONS });
+              dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
               params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
             }
 
             const maybeEdit = async (force = false) => {
               if (!reply) return;
+              if (isShuttingDown()) return;
               const now = Date.now();
               if (!force && now - lastEditAt < minEditIntervalMs) return;
               lastEditAt = now;
@@ -728,6 +736,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               followUpLines.join('\n') +
               `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
             followUpDepth++;
+          }
+
+          } finally {
+            dispose();
           }
 
           if (params.summaryEnabled) {

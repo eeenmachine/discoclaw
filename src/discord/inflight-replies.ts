@@ -1,0 +1,254 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import type { LoggerLike } from './action-types.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
+
+type DiscordMessage = {
+  edit(opts: { content: string; allowedMentions?: { parse: readonly never[] } }): Promise<unknown>;
+};
+
+type InFlightEntry = {
+  reply: DiscordMessage;
+  channelId: string;
+  messageId: string;
+  label: string;
+};
+
+type OrphanEntry = {
+  channelId: string;
+  messageId: string;
+};
+
+const INTERRUPTED_GRACEFUL = '*(Interrupted \u2014 bot is restarting.)*';
+const INTERRUPTED_COLD = '*(Interrupted \u2014 bot was restarted.)*';
+
+// --- Module state ---
+const registry = new Map<string, InFlightEntry>();
+let shuttingDown = false;
+let dataFilePath: string | null = null;
+
+// --- Public API ---
+
+/**
+ * Configure the path for the persistent inflight.json file.
+ * Call once at startup after dataDir is resolved.
+ */
+export function setDataFilePath(filePath: string): void {
+  dataFilePath = filePath;
+}
+
+/**
+ * Register an in-progress Discord reply. Returns a disposer function
+ * that unregisters the entry. Use in try/finally to guarantee cleanup.
+ */
+export function registerInFlightReply(
+  reply: DiscordMessage,
+  channelId: string,
+  messageId: string,
+  label: string,
+): () => void {
+  if (shuttingDown) {
+    // Drain already happened — immediately edit and discard.
+    reply.edit({ content: INTERRUPTED_GRACEFUL, allowedMentions: NO_MENTIONS }).catch(() => {});
+    return () => {};
+  }
+
+  const key = `${channelId}:${messageId}`;
+  registry.set(key, { reply, channelId, messageId, label });
+
+  // Best-effort persist for cold-start recovery.
+  persistAdd({ channelId, messageId }).catch(() => {});
+
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    registry.delete(key);
+    persistRemove({ channelId, messageId }).catch(() => {});
+  };
+}
+
+/**
+ * Number of currently tracked in-flight replies.
+ */
+export function inFlightReplyCount(): number {
+  return registry.size;
+}
+
+/**
+ * Returns true once drainInFlightReplies has been called.
+ * Streaming loops should check this and no-op if true,
+ * preventing the "Interrupted" text from being overwritten.
+ */
+export function isShuttingDown(): boolean {
+  return shuttingDown;
+}
+
+/**
+ * Atomically snapshot and clear the registry, set the shutdown flag,
+ * then edit all tracked replies in parallel with a timeout.
+ */
+export async function drainInFlightReplies(opts?: {
+  timeoutMs?: number;
+  log?: LoggerLike;
+}): Promise<void> {
+  const timeoutMs = opts?.timeoutMs ?? 3000;
+  const log = opts?.log;
+
+  // Atomic snapshot + clear + flag.
+  const entries = Array.from(registry.values());
+  registry.clear();
+  shuttingDown = true;
+
+  if (entries.length === 0) {
+    // Clear persistent file even if registry was empty (belt-and-suspenders).
+    await persistClear().catch(() => {});
+    return;
+  }
+
+  log?.info({ count: entries.length }, 'inflight:drain editing in-flight replies');
+
+  const editPromises = entries.map((entry) =>
+    entry.reply
+      .edit({ content: INTERRUPTED_GRACEFUL, allowedMentions: NO_MENTIONS })
+      .then(() => {
+        log?.info({ channelId: entry.channelId, messageId: entry.messageId, label: entry.label }, 'inflight:drain edited');
+      })
+      .catch((err) => {
+        log?.warn({ err, channelId: entry.channelId, messageId: entry.messageId }, 'inflight:drain edit failed');
+      }),
+  );
+
+  await Promise.race([
+    Promise.allSettled(editPromises),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+
+  await persistClear().catch(() => {});
+}
+
+// --- Cold-start recovery ---
+
+/**
+ * Load orphaned reply entries from the persistent file (for cold-start recovery).
+ */
+export function loadOrphanedReplies(filePath: string): Promise<OrphanEntry[]> {
+  return fs.readFile(filePath, 'utf-8')
+    .then((raw) => {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(
+        (e: unknown): e is OrphanEntry =>
+          typeof e === 'object' && e !== null &&
+          typeof (e as any).channelId === 'string' &&
+          typeof (e as any).messageId === 'string',
+      );
+    })
+    .catch(() => []);
+}
+
+/**
+ * On startup, detect and clean up any orphaned messages left by a previous unclean exit.
+ */
+export async function cleanupOrphanedReplies(opts: {
+  client: { channels: { fetch(id: string): Promise<any> } };
+  dataFilePath: string;
+  log?: LoggerLike;
+  timeoutMs?: number;
+}): Promise<void> {
+  const { client, dataFilePath: filePath, log, timeoutMs = 5000 } = opts;
+
+  const orphans = await loadOrphanedReplies(filePath);
+  if (orphans.length === 0) return;
+
+  log?.info({ count: orphans.length }, 'inflight:cold-start cleaning up orphaned replies');
+
+  const cleanup = async () => {
+    for (const orphan of orphans) {
+      try {
+        const channel = await client.channels.fetch(orphan.channelId);
+        if (!channel || typeof (channel as any).messages?.fetch !== 'function') {
+          log?.warn({ channelId: orphan.channelId }, 'inflight:cold-start channel not fetchable');
+          continue;
+        }
+        const message = await (channel as any).messages.fetch(orphan.messageId);
+        await message.edit({ content: INTERRUPTED_COLD, allowedMentions: NO_MENTIONS });
+        log?.info({ channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start edited orphan');
+      } catch (err) {
+        log?.warn({ err, channelId: orphan.channelId, messageId: orphan.messageId }, 'inflight:cold-start orphan cleanup failed');
+      }
+    }
+  };
+
+  await Promise.race([
+    cleanup(),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+
+  // Clear the file after processing.
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // Already gone or inaccessible.
+  }
+}
+
+// --- Persistence helpers (atomic write-tmp-rename) ---
+
+async function readPersistedEntries(): Promise<OrphanEntry[]> {
+  if (!dataFilePath) return [];
+  try {
+    const raw = await fs.readFile(dataFilePath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+async function writePersistedEntries(entries: OrphanEntry[]): Promise<void> {
+  if (!dataFilePath) return;
+  const tmpPath = `${dataFilePath}.tmp.${process.pid}`;
+  await fs.writeFile(tmpPath, JSON.stringify(entries) + '\n', 'utf-8');
+  await fs.rename(tmpPath, dataFilePath);
+}
+
+async function persistAdd(entry: OrphanEntry): Promise<void> {
+  if (!dataFilePath) return;
+  const entries = await readPersistedEntries();
+  const key = `${entry.channelId}:${entry.messageId}`;
+  // Avoid duplicates.
+  if (!entries.some((e) => `${e.channelId}:${e.messageId}` === key)) {
+    entries.push(entry);
+  }
+  await writePersistedEntries(entries);
+}
+
+async function persistRemove(entry: OrphanEntry): Promise<void> {
+  if (!dataFilePath) return;
+  const entries = await readPersistedEntries();
+  const key = `${entry.channelId}:${entry.messageId}`;
+  const filtered = entries.filter((e) => `${e.channelId}:${e.messageId}` !== key);
+  await writePersistedEntries(filtered);
+}
+
+async function persistClear(): Promise<void> {
+  if (!dataFilePath) return;
+  try {
+    await fs.unlink(dataFilePath);
+  } catch {
+    // File doesn't exist or inaccessible — fine.
+  }
+}
+
+// --- Test helpers ---
+
+/**
+ * Reset module state. Only for use in tests.
+ */
+export function _resetForTest(): void {
+  registry.clear();
+  shuttingDown = false;
+  dataFilePath = null;
+}

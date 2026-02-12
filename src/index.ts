@@ -31,6 +31,7 @@ import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
+import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -76,13 +77,18 @@ try {
   process.exit(1);
 }
 
+// --- Configure inflight reply persistence (for graceful shutdown + cold-start recovery) ---
+setDataFilePath(path.join(pidLockDir, 'inflight.json'));
+
 let botStatus: StatusPoster | null = null;
 let cronScheduler: CronScheduler | null = null;
 let beadSyncWatcher: { stop(): void } | null = null;
 let beadForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 const shutdown = async () => {
-  // Kill Claude subprocesses first so they release session locks before the new instance starts.
+  // Edit all in-progress Discord replies before killing subprocesses.
+  await drainInFlightReplies({ timeoutMs: 3000, log });
+  // Kill Claude subprocesses so they release session locks before the new instance starts.
   killActiveSubprocesses();
   // Best-effort: may not complete before SIGKILL on short shutdown windows.
   beadForumCountSync?.stop();
@@ -421,6 +427,9 @@ const botParams = {
 
 const { client, status, system } = await startDiscordBot(botParams);
 botStatus = status;
+
+// --- Cold-start: clean up orphaned in-flight replies from a previous unclean exit ---
+await cleanupOrphanedReplies({ client, dataFilePath: path.join(pidLockDir, 'inflight.json'), log });
 
 // --- Configure beads context after bootstrap (so the forum can be auto-created) ---
 let beadCtx: BeadContext | undefined;

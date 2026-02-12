@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 
 import { createMessageCreateHandler } from './discord.js';
 import { hasQueryAction, QUERY_ACTION_TYPES } from './discord/action-categories.js';
+import { inFlightReplyCount, _resetForTest as resetInFlight } from './discord/inflight-replies.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -338,5 +339,79 @@ describe('auto-follow-up for query actions', () => {
 
     // channelInfo for a non-existent channel fails -> no follow-up.
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-flight reply cleanup verification
+// ---------------------------------------------------------------------------
+
+describe('in-flight reply registry cleanup', () => {
+  afterEach(() => {
+    resetInFlight();
+  });
+
+  it('no leaked registry entries after normal completion', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'Hello there!' } as any;
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    await handler(makeMsg());
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries after follow-up completes', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: 'text_final', text: 'Listing:\n<discord-action>{"type":"channelList"}</discord-action>' } as any;
+        } else {
+          yield { type: 'text_final', text: 'Analysis complete with sufficient length to avoid suppression threshold limits.' } as any;
+        }
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    await handler(makeMsg());
+
+    expect(runtime.invoke).toHaveBeenCalledTimes(2);
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries after runtime error', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'error', message: 'runtime crashed' } as any;
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+    await handler(makeMsg());
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries on requireChannelContext early return', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'should not reach' } as any;
+      }),
+    } as any;
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, { requireChannelContext: true }),
+      makeQueue(),
+    );
+    await handler(makeMsg());
+
+    // Runtime should not have been invoked (early return before invoke).
+    expect(runtime.invoke).not.toHaveBeenCalled();
+    expect(inFlightReplyCount()).toBe(0);
   });
 });

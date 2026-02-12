@@ -12,6 +12,7 @@ import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, build
 import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -310,6 +311,10 @@ function createReactionHandler(
             `${logPrefix}:invoke:start`,
           );
 
+          // Track this reply for graceful shutdown cleanup.
+          const dispose = registerInFlightReply(reply!, reaction.message.channelId, (reply as any).id, `${logPrefix}:${reaction.message.channelId}`);
+          try {
+
           // Streaming pattern (matches discord.ts flat mode).
           // Both add and remove handlers record under the 'reaction' invoke flow so
           // latency lands in MetricsRegistry.latencies.reaction (avoids InvokeFlow
@@ -327,6 +332,7 @@ function createReactionHandler(
 
           const maybeEdit = async (force = false) => {
             if (!reply) return;
+            if (isShuttingDown()) return;
             const now = Date.now();
             if (!force && now - lastEditAt < minEditIntervalMs) return;
             lastEditAt = now;
@@ -430,6 +436,10 @@ function createReactionHandler(
             } else {
               throw editErr;
             }
+          }
+
+          } finally {
+            dispose();
           }
         } catch (err) {
           metrics.increment(handlerErrorMetric);
