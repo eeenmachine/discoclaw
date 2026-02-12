@@ -19,6 +19,9 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
+import { parsePlanCommand, handlePlanCommand } from './discord/plan-commands.js';
+import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
+import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
@@ -88,6 +91,13 @@ export type BotParams = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  planCommandsEnabled?: boolean;
+  forgeCommandsEnabled?: boolean;
+  forgeMaxAuditRounds?: number;
+  forgeDrafterModel?: string;
+  forgeAuditorModel?: string;
+  forgeTimeoutMs?: number;
+  forgeProgressThrottleMs?: number;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermDataDir: string;
@@ -152,6 +162,9 @@ export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 export type StatusRef = { current: StatusPoster | null };
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
+  // Global forge orchestrator — one forge at a time across all channels.
+  let forgeOrchestrator: ForgeOrchestrator | null = null;
+
   return async (msg: any) => {
     try {
       if (!msg?.author || msg.author.bot) return;
@@ -299,6 +312,139 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelName: channelName || undefined,
               });
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Handle !plan commands before session creation.
+          if (params.planCommandsEnabled) {
+            const planCmd = parsePlanCommand(String(msg.content ?? ''));
+            if (planCmd) {
+              const response = await handlePlanCommand(planCmd, {
+                workspaceCwd: params.workspaceCwd,
+                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+              });
+              await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Handle !forge commands — long-running, async plan creation.
+          if (params.forgeCommandsEnabled) {
+            const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
+            if (forgeCmd) {
+              if (forgeCmd.action === 'help') {
+                await msg.reply({
+                  content: [
+                    '**!forge commands:**',
+                    '- `!forge <description>` — auto-draft and audit a plan',
+                    '- `!forge status` — check if a forge is running',
+                    '- `!forge cancel` — cancel the running forge',
+                  ].join('\n'),
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              if (forgeCmd.action === 'status') {
+                const running = forgeOrchestrator?.isRunning ?? false;
+                await msg.reply({
+                  content: running ? 'A forge is currently running.' : 'No forge running.',
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              if (forgeCmd.action === 'cancel') {
+                if (forgeOrchestrator?.isRunning) {
+                  forgeOrchestrator.requestCancel();
+                  await msg.reply({ content: 'Forge cancel requested.', allowedMentions: NO_MENTIONS });
+                } else {
+                  await msg.reply({ content: 'No forge running to cancel.', allowedMentions: NO_MENTIONS });
+                }
+                return;
+              }
+
+              // action === 'create'
+              if (forgeOrchestrator?.isRunning) {
+                await msg.reply({
+                  content: 'A forge is already running. Use `!forge cancel` to stop it first.',
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              const plansDir = path.join(params.workspaceCwd, 'plans');
+              forgeOrchestrator = new ForgeOrchestrator({
+                runtime: params.runtime,
+                model: params.runtimeModel,
+                cwd: params.workspaceCwd,
+                workspaceCwd: params.workspaceCwd,
+                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                plansDir,
+                maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
+                progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
+                timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
+                drafterModel: params.forgeDrafterModel,
+                auditorModel: params.forgeAuditorModel,
+                log: params.log,
+              });
+
+              // Send initial progress message
+              const progressReply = await msg.reply({
+                content: `Starting forge: ${forgeCmd.args}`,
+                allowedMentions: NO_MENTIONS,
+              });
+
+              // Throttle state for progress edits
+              let lastEditAt = 0;
+              const throttleMs = params.forgeProgressThrottleMs ?? 3000;
+              let progressMessageGone = false;
+
+              const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                if (progressMessageGone) return;
+                const now = Date.now();
+                if (!opts?.force && now - lastEditAt < throttleMs) return;
+                lastEditAt = now;
+                try {
+                  await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                } catch (editErr: any) {
+                  if (editErr?.code === 10008) {
+                    progressMessageGone = true;
+                  }
+                }
+              };
+
+              // Run forge in the background — don't block the queue
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              forgeOrchestrator.run(forgeCmd.args, onProgress).then(
+                async (result) => {
+                  if (progressMessageGone) {
+                    try {
+                      const summary = result.error
+                        ? `Forge failed: ${result.error}`
+                        : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}). Use \`!plan show ${result.planId}\` to view.`;
+                      await msg.channel.send({ content: summary, allowedMentions: NO_MENTIONS });
+                    } catch {
+                      // best-effort
+                    }
+                  }
+                },
+                async (err) => {
+                  params.log?.error({ err }, 'forge:unhandled error');
+                  try {
+                    const errMsg = `Forge crashed: ${String(err)}`;
+                    if (progressMessageGone) {
+                      await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    } else {
+                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    }
+                  } catch {
+                    // best-effort
+                  }
+                },
+              );
+
               return;
             }
           }

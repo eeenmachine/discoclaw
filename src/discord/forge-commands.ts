@@ -1,0 +1,600 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { handlePlanCommand } from './plan-commands.js';
+import { parsePlanFileHeader } from './plan-commands.js';
+import type { RuntimeAdapter } from '../runtime/types.js';
+import type { LoggerLike } from './action-types.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ForgeCommand = {
+  action: 'create' | 'help' | 'status' | 'cancel';
+  args: string;
+};
+
+export type ForgeResult = {
+  planId: string;
+  filePath: string;
+  finalVerdict: string;
+  rounds: number;
+  reachedMaxRounds: boolean;
+  error?: string;
+};
+
+export type ForgeOrchestratorOpts = {
+  runtime: RuntimeAdapter;
+  model: string;
+  cwd: string;
+  workspaceCwd: string;
+  beadsCwd: string;
+  plansDir: string;
+  maxAuditRounds: number;
+  progressThrottleMs: number;
+  timeoutMs: number;
+  drafterModel?: string;
+  auditorModel?: string;
+  log?: LoggerLike;
+};
+
+type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
+
+// ---------------------------------------------------------------------------
+// Parsing
+// ---------------------------------------------------------------------------
+
+const RESERVED_SUBCOMMANDS = new Set(['status', 'cancel', 'help']);
+
+export function parseForgeCommand(content: string): ForgeCommand | null {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith('!forge')) return null;
+
+  // Reject !forging, !forger, etc. — must be exactly "!forge" optionally followed by whitespace.
+  const afterPrefix = trimmed.slice('!forge'.length);
+  if (afterPrefix.length > 0 && !/^\s/.test(afterPrefix)) return null;
+
+  const rest = afterPrefix.trim();
+
+  if (!rest) return { action: 'help', args: '' };
+
+  const firstWord = rest.split(/\s+/)[0]!.toLowerCase();
+  if (RESERVED_SUBCOMMANDS.has(firstWord)) {
+    const subArgs = rest.slice(firstWord.length).trim();
+    return { action: firstWord as ForgeCommand['action'], args: subArgs };
+  }
+
+  return { action: 'create', args: rest };
+}
+
+// ---------------------------------------------------------------------------
+// Audit verdict parsing
+// ---------------------------------------------------------------------------
+
+export type AuditVerdict = {
+  maxSeverity: 'high' | 'medium' | 'low' | 'none';
+  shouldLoop: boolean;
+};
+
+export function parseAuditVerdict(auditText: string): AuditVerdict {
+  if (!auditText || !auditText.trim()) {
+    return { maxSeverity: 'none', shouldLoop: false };
+  }
+
+  const lower = auditText.toLowerCase();
+
+  // Look for severity markers
+  const hasHigh = /severity:\s*high/i.test(auditText) || /\*\*severity:\s*high/i.test(auditText);
+  const hasMedium = /severity:\s*medium/i.test(auditText) || /\*\*severity:\s*medium/i.test(auditText);
+  const hasLow = /severity:\s*low/i.test(auditText) || /\*\*severity:\s*low/i.test(auditText);
+
+  if (hasHigh) return { maxSeverity: 'high', shouldLoop: true };
+  if (hasMedium) return { maxSeverity: 'medium', shouldLoop: true };
+  if (hasLow) return { maxSeverity: 'low', shouldLoop: false };
+
+  // Fallback: look for "ready to approve" as a clean signal
+  if (lower.includes('ready to approve')) {
+    return { maxSeverity: 'low', shouldLoop: false };
+  }
+
+  // Malformed output — stop and let the human review
+  return { maxSeverity: 'none', shouldLoop: false };
+}
+
+// ---------------------------------------------------------------------------
+// Prompt builders
+// ---------------------------------------------------------------------------
+
+export function buildDrafterPrompt(
+  description: string,
+  templateContent: string,
+  contextSummary: string,
+): string {
+  return [
+    'You are a senior software engineer drafting a technical implementation plan.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Plan Template',
+    '',
+    'Fill in this template completely. Output the complete plan file content starting with `# Plan:` and ending with the Audit Log section. Output ONLY the plan markdown — no preamble, no explanation, no commentary.',
+    '',
+    '```',
+    templateContent,
+    '```',
+    '',
+    '## Project Context',
+    '',
+    contextSummary,
+    '',
+    '## Instructions',
+    '',
+    '- Read the codebase using your tools (Read, Glob, Grep) to understand the existing code before writing the plan.',
+    '- Be specific in the file-by-file changes section — include actual file paths, function names, and type signatures.',
+    '- Identify real risks and dependencies based on the actual codebase.',
+    '- Write concrete, verifiable test cases.',
+    '- Set the status to DRAFT.',
+    '- Replace all {{PLACEHOLDER}} tokens with actual values. The plan ID and bead ID will be filled in by the system — use `(system)` as placeholders for those.',
+    '- Output the complete plan markdown and nothing else.',
+  ].join('\n');
+}
+
+export function buildAuditorPrompt(planContent: string, roundNumber: number): string {
+  return [
+    'You are an adversarial senior engineer auditing a technical plan. Your job is to find flaws, gaps, and risks.',
+    '',
+    '## Plan to Audit',
+    '',
+    '```markdown',
+    planContent,
+    '```',
+    '',
+    `## This is audit round ${roundNumber}.`,
+    '',
+    '## Instructions',
+    '',
+    'Review the plan for:',
+    '1. Missing or underspecified details (vague scope, unclear file changes)',
+    '2. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
+    '3. Risk gaps (unidentified failure modes, missing rollback plans)',
+    '4. Test coverage gaps (missing edge cases, untested error paths)',
+    '5. Dependency issues (circular deps, version conflicts, missing imports)',
+    '',
+    '## Output Format',
+    '',
+    'For each concern, write:',
+    '',
+    '**Concern N: [title]**',
+    'Description of the issue.',
+    '**Severity: high | medium | low**',
+    '',
+    'Then write a verdict:',
+    '',
+    '**Verdict:** [one of:]',
+    '- "Needs revision." — if any high or medium severity concerns exist',
+    '- "Ready to approve." — if only low severity concerns remain',
+    '',
+    'Be thorough but fair. Don\'t nitpick style — focus on correctness, safety, and completeness.',
+    'Output only the audit notes and verdict. No preamble.',
+  ].join('\n');
+}
+
+export function buildRevisionPrompt(
+  planContent: string,
+  auditNotes: string,
+  description: string,
+): string {
+  return [
+    'You are a senior software engineer revising a technical plan based on audit feedback.',
+    '',
+    '## Original Description',
+    '',
+    description,
+    '',
+    '## Current Plan',
+    '',
+    '```markdown',
+    planContent,
+    '```',
+    '',
+    '## Audit Feedback',
+    '',
+    auditNotes,
+    '',
+    '## Instructions',
+    '',
+    '- Address all high and medium severity concerns from the audit.',
+    '- Read the codebase using your tools if needed to resolve concerns.',
+    '- Keep the same plan structure and format.',
+    '- Output the complete revised plan markdown starting with `# Plan:`. Output ONLY the plan markdown — no preamble, no explanation.',
+  ].join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Runtime text collector
+// ---------------------------------------------------------------------------
+
+async function collectRuntimeText(
+  runtime: RuntimeAdapter,
+  prompt: string,
+  model: string,
+  cwd: string,
+  tools: string[],
+  addDirs: string[],
+  timeoutMs: number,
+): Promise<string> {
+  let text = '';
+  for await (const evt of runtime.invoke({
+    prompt,
+    model,
+    cwd,
+    tools,
+    addDirs: addDirs.length > 0 ? addDirs : undefined,
+    timeoutMs,
+  })) {
+    if (evt.type === 'text_final') {
+      text = evt.text;
+    } else if (evt.type === 'text_delta') {
+      // Accumulate deltas in case text_final isn't emitted
+      text += evt.text;
+    } else if (evt.type === 'error') {
+      throw new Error(`Runtime error: ${evt.message}`);
+    }
+  }
+  return text;
+}
+
+// ---------------------------------------------------------------------------
+// ForgeOrchestrator
+// ---------------------------------------------------------------------------
+
+export class ForgeOrchestrator {
+  private running = false;
+  private cancelRequested = false;
+  private opts: ForgeOrchestratorOpts;
+
+  constructor(opts: ForgeOrchestratorOpts) {
+    this.opts = opts;
+  }
+
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  requestCancel(): void {
+    this.cancelRequested = true;
+  }
+
+  async run(
+    description: string,
+    onProgress: ProgressFn,
+  ): Promise<ForgeResult> {
+    if (this.running) {
+      throw new Error('A forge is already running');
+    }
+    this.running = true;
+    this.cancelRequested = false;
+    const t0 = Date.now();
+
+    let planId = '';
+    let filePath = '';
+
+    try {
+      // 1. Create the plan file via handlePlanCommand
+      const createResult = await handlePlanCommand(
+        { action: 'create', args: description },
+        { workspaceCwd: this.opts.workspaceCwd, beadsCwd: this.opts.beadsCwd },
+      );
+
+      // Extract plan ID from the response
+      const idMatch = createResult.match(/\*\*(plan-\d+)\*\*/);
+      planId = idMatch?.[1] ?? '';
+
+      if (!planId) {
+        throw new Error(`Failed to create plan: ${createResult}`);
+      }
+
+      // Find the plan file
+      const plansDir = this.opts.plansDir;
+      const entries = await fs.readdir(plansDir);
+      const planFile = entries.find((e) => e.startsWith(planId));
+      if (!planFile) {
+        throw new Error(`Plan file not found for ${planId}`);
+      }
+      filePath = path.join(plansDir, planFile);
+
+      // Load the template for the drafter prompt
+      let templateContent: string;
+      try {
+        templateContent = await fs.readFile(
+          path.join(plansDir, '.plan-template.md'),
+          'utf-8',
+        );
+      } catch {
+        // Use a simple fallback
+        templateContent = await fs.readFile(filePath, 'utf-8');
+      }
+
+      // Build context summary from workspace files
+      const contextSummary = await this.buildContextSummary();
+
+      const drafterModel = this.opts.drafterModel ?? this.opts.model;
+      const auditorModel = this.opts.auditorModel ?? this.opts.model;
+      const readOnlyTools = ['Read', 'Glob', 'Grep'];
+      const addDirs = [this.opts.cwd];
+
+      let round = 0;
+      let planContent = await fs.readFile(filePath, 'utf-8');
+      let lastAuditNotes = '';
+      let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
+
+      while (round < this.opts.maxAuditRounds) {
+        if (this.cancelRequested) {
+          await this.updatePlanStatus(filePath, 'CANCELLED');
+          return {
+            planId,
+            filePath,
+            finalVerdict: 'CANCELLED',
+            rounds: round,
+            reachedMaxRounds: false,
+          };
+        }
+
+        round++;
+
+        // Draft phase (or revision phase on subsequent rounds)
+        if (round === 1) {
+          await onProgress(`Forging ${planId}... Drafting (reading codebase)`);
+
+          const drafterPrompt = buildDrafterPrompt(
+            description,
+            templateContent,
+            contextSummary,
+          );
+
+          const draftOutput = await collectRuntimeText(
+            this.opts.runtime,
+            drafterPrompt,
+            drafterModel,
+            this.opts.cwd,
+            readOnlyTools,
+            addDirs,
+            this.opts.timeoutMs,
+          );
+
+          // Write the draft — preserve the header (planId, beadId) from the created file
+          planContent = this.mergeDraftWithHeader(planContent, draftOutput);
+          await this.atomicWrite(filePath, planContent);
+        } else {
+          await onProgress(
+            `Forging ${planId}... Revision complete. Audit round ${round}/${this.opts.maxAuditRounds}...`,
+          );
+        }
+
+        // Audit phase
+        await onProgress(
+          round === 1
+            ? `Forging ${planId}... Draft complete. Audit round ${round}/${this.opts.maxAuditRounds}...`
+            : `Forging ${planId}... Audit round ${round}/${this.opts.maxAuditRounds}...`,
+        );
+
+        const auditorPrompt = buildAuditorPrompt(planContent, round);
+        const auditOutput = await collectRuntimeText(
+          this.opts.runtime,
+          auditorPrompt,
+          auditorModel,
+          this.opts.cwd,
+          [], // auditor doesn't need tools
+          [],
+          this.opts.timeoutMs,
+        );
+
+        lastAuditNotes = auditOutput;
+        lastVerdict = parseAuditVerdict(auditOutput);
+
+        // Append audit notes to the plan file
+        planContent = this.appendAuditRound(planContent, round, auditOutput, lastVerdict);
+        await this.atomicWrite(filePath, planContent);
+
+        // Check if we should loop
+        if (!lastVerdict.shouldLoop) {
+          await this.updatePlanStatus(filePath, 'REVIEW');
+          const elapsed = Math.round((Date.now() - t0) / 1000);
+          await onProgress(
+            `Forge complete. Plan ${planId} ready for review (${round} round${round > 1 ? 's' : ''}, ${elapsed}s)`,
+            { force: true },
+          );
+          return {
+            planId,
+            filePath,
+            finalVerdict: lastVerdict.maxSeverity,
+            rounds: round,
+            reachedMaxRounds: false,
+          };
+        }
+
+        // Check if we've hit the cap
+        if (round >= this.opts.maxAuditRounds) {
+          break;
+        }
+
+        // Revision phase
+        await onProgress(
+          `Forging ${planId}... Audit round ${round} found ${lastVerdict.maxSeverity} concerns. Revising...`,
+        );
+
+        const revisionPrompt = buildRevisionPrompt(
+          planContent,
+          auditOutput,
+          description,
+        );
+
+        const revisionOutput = await collectRuntimeText(
+          this.opts.runtime,
+          revisionPrompt,
+          drafterModel,
+          this.opts.cwd,
+          readOnlyTools,
+          addDirs,
+          this.opts.timeoutMs,
+        );
+
+        planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
+        await this.atomicWrite(filePath, planContent);
+      }
+
+      // Cap reached
+      planContent = planContent.replace(
+        /(\n---\n\n## Implementation Notes)/,
+        `\n\nVERDICT: CAP_REACHED\n$1`,
+      );
+      await this.atomicWrite(filePath, planContent);
+      await this.updatePlanStatus(filePath, 'REVIEW');
+
+      const elapsed = Math.round((Date.now() - t0) / 1000);
+      await onProgress(
+        `Forge stopped after ${this.opts.maxAuditRounds} audit rounds — concerns remain. Review manually: \`!plan show ${planId}\``,
+        { force: true },
+      );
+
+      return {
+        planId,
+        filePath,
+        finalVerdict: lastVerdict.maxSeverity,
+        rounds: round,
+        reachedMaxRounds: true,
+      };
+    } catch (err) {
+      const errorMsg = String(err instanceof Error ? err.message : err);
+      this.opts.log?.error({ err, planId }, 'forge:error');
+
+      // Write partial state if we have a file
+      if (filePath) {
+        try {
+          await this.updatePlanStatus(filePath, 'DRAFT');
+        } catch {
+          // best-effort
+        }
+      }
+
+      await onProgress(
+        `Forge failed${planId ? ` during ${planId}` : ''}: ${errorMsg}${filePath ? `. Partial plan saved: \`!plan show ${planId}\`` : ''}`,
+        { force: true },
+      );
+
+      return {
+        planId: planId || '(none)',
+        filePath: filePath || '',
+        finalVerdict: 'error',
+        rounds: 0,
+        reachedMaxRounds: false,
+        error: errorMsg,
+      };
+    } finally {
+      this.running = false;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Private helpers
+  // -----------------------------------------------------------------------
+
+  private async buildContextSummary(): Promise<string> {
+    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'];
+    const sections: string[] = [];
+    for (const name of contextFiles) {
+      const p = path.join(this.opts.workspaceCwd, name);
+      try {
+        const content = await fs.readFile(p, 'utf-8');
+        sections.push(`--- ${name} ---\n${content.trimEnd()}`);
+      } catch {
+        // skip missing files
+      }
+    }
+    if (sections.length === 0) {
+      return '(No workspace context files found.)';
+    }
+    return sections.join('\n\n');
+  }
+
+  /**
+   * Merge drafter output into the plan file, preserving the system-generated header
+   * (plan ID, bead ID, created date) from the original file.
+   */
+  private mergeDraftWithHeader(originalContent: string, draftOutput: string): string {
+    // Extract the header from the original file (up to and including the first ---)
+    const headerMatch = originalContent.match(/^([\s\S]*?\*\*Project:\*\*[^\n]*\n)/);
+    if (!headerMatch) return draftOutput;
+
+    const header = headerMatch[1];
+
+    // Strip any header the drafter may have generated
+    const draftBody = draftOutput.replace(/^[\s\S]*?\*\*Project:\*\*[^\n]*\n/, '');
+
+    // If the drafter didn't include a header, just prepend the original one
+    if (draftBody === draftOutput) {
+      // The drafter output doesn't have the header pattern — prepend the original header
+      const planTitleMatch = draftOutput.match(/^# Plan:[^\n]*\n/);
+      if (planTitleMatch) {
+        // Has a plan title but different header format — replace just the metadata
+        const titleLine = planTitleMatch[0];
+        const afterTitle = draftOutput.slice(titleLine.length);
+        const originalTitle = header.match(/^# Plan:[^\n]*\n/)?.[0] ?? '';
+        return header.replace(originalTitle, titleLine) + afterTitle;
+      }
+      return header + '\n---\n\n' + draftOutput;
+    }
+
+    return header + draftBody;
+  }
+
+  private appendAuditRound(
+    planContent: string,
+    round: number,
+    auditNotes: string,
+    verdict: AuditVerdict,
+  ): string {
+    const date = new Date().toISOString().split('T')[0]!;
+    const verdictText = verdict.shouldLoop ? 'Needs revision.' : 'Ready to approve.';
+
+    const auditSection = [
+      '',
+      `### Review ${round} — ${date}`,
+      `**Status:** COMPLETE`,
+      '',
+      auditNotes.trim(),
+      '',
+    ].join('\n');
+
+    // Insert before Implementation Notes section
+    const implNotesIdx = planContent.indexOf('## Implementation Notes');
+    if (implNotesIdx !== -1) {
+      return (
+        planContent.slice(0, implNotesIdx) +
+        auditSection +
+        '\n---\n\n' +
+        planContent.slice(implNotesIdx)
+      );
+    }
+
+    // Fallback: append at end
+    return planContent + '\n' + auditSection;
+  }
+
+  private async atomicWrite(filePath: string, content: string): Promise<void> {
+    const tmpPath = filePath + '.tmp';
+    await fs.writeFile(tmpPath, content, 'utf-8');
+    await fs.rename(tmpPath, filePath);
+  }
+
+  private async updatePlanStatus(filePath: string, newStatus: string): Promise<void> {
+    const content = await fs.readFile(filePath, 'utf-8');
+    const updated = content.replace(
+      /^\*\*Status:\*\*\s*.+$/m,
+      `**Status:** ${newStatus}`,
+    );
+    await this.atomicWrite(filePath, updated);
+  }
+}

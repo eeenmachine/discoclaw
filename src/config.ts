@@ -46,6 +46,13 @@ export type DiscoclawConfig = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  planCommandsEnabled: boolean;
+  forgeCommandsEnabled: boolean;
+  forgeMaxAuditRounds: number;
+  forgeDrafterModel?: string;
+  forgeAuditorModel?: string;
+  forgeTimeoutMs: number;
+  forgeProgressThrottleMs: number;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermMaxEntries: number;
@@ -368,6 +375,13 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       durableInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_DURABLE_INJECT_MAX_CHARS', 2000),
       durableMaxItems: parsePositiveInt(env, 'DISCOCLAW_DURABLE_MAX_ITEMS', 200),
       memoryCommandsEnabled: parseBoolean(env, 'DISCOCLAW_MEMORY_COMMANDS_ENABLED', true),
+      planCommandsEnabled: parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', true),
+      forgeCommandsEnabled: parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', true),
+      forgeMaxAuditRounds: parsePositiveInt(env, 'FORGE_MAX_AUDIT_ROUNDS', 5),
+      forgeDrafterModel: parseTrimmedString(env, 'FORGE_DRAFTER_MODEL'),
+      forgeAuditorModel: parseTrimmedString(env, 'FORGE_AUDITOR_MODEL'),
+      forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', 5 * 60_000),
+      forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', false),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', false),
       shortTermMaxEntries: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_MAX_ENTRIES', 20),
