@@ -28,7 +28,7 @@ import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './discord/output-utils.js';
-import { buildContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages } from './discord/image-download.js';
@@ -426,25 +426,28 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }),
           ]);
 
+          const inlinedContext = await inlineContextFiles(contextFiles);
+
           let prompt =
-            `Context files (read with Read tool before responding, in order):\n` +
-            contextFiles.map((p) => `- ${p}`).join('\n') +
+            (inlinedContext
+              ? inlinedContext + '\n\n'
+              : '') +
             (beadSection
-              ? `\n\n---\n${beadSection}\n`
+              ? `---\n${beadSection}\n\n`
               : '') +
             (durableSection
-              ? `\n\n---\nDurable memory (user-specific notes):\n${durableSection}\n`
+              ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
               : '') +
             (shortTermSection
-              ? `\n\n---\nRecent activity (cross-channel):\n${shortTermSection}\n`
+              ? `---\nRecent activity (cross-channel):\n${shortTermSection}\n\n`
               : '') +
             (summarySection
-              ? `\n\n---\nConversation memory:\n${summarySection}\n`
+              ? `---\nConversation memory:\n${summarySection}\n\n`
               : '') +
             (historySection
-              ? `\n\n---\nRecent conversation:\n${historySection}\n`
-              : '\n') +
-            `\n---\nUser message:\n` +
+              ? `---\nRecent conversation:\n${historySection}\n\n`
+              : '') +
+            `---\nUser message:\n` +
             String(msg.content ?? '');
 
           if (params.discordActionsEnabled && !isDm) {

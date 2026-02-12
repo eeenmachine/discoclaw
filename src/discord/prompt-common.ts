@@ -58,6 +58,25 @@ export function buildContextFiles(
   return contextFiles;
 }
 
+/**
+ * Read all context files and return their contents inlined into a single string.
+ * Falls back gracefully if any file can't be read.
+ */
+export async function inlineContextFiles(filePaths: string[]): Promise<string> {
+  if (filePaths.length === 0) return '';
+  const sections: string[] = [];
+  for (const filePath of filePaths) {
+    try {
+      const content = await fs.readFile(filePath, 'utf-8');
+      const name = path.basename(filePath);
+      sections.push(`--- ${name} ---\n${content.trimEnd()}`);
+    } catch {
+      // Skip files that can't be read (missing, permission error, etc.)
+    }
+  }
+  return sections.join('\n\n');
+}
+
 export async function buildDurableMemorySection(opts: {
   enabled: boolean;
   durableDataDir: string;

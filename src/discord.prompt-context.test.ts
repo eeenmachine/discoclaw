@@ -37,8 +37,8 @@ function makeMsg(overrides: Partial<any>) {
   };
 }
 
-describe('prompt includes correct context file paths', () => {
-  it('guild channel uses channel context file', async () => {
+describe('prompt inlines context file contents', () => {
+  it('guild channel inlines base + channel context files', async () => {
     const queue = makeQueue();
     let seenPrompt = '';
     const runtime = {
@@ -48,16 +48,27 @@ describe('prompt includes correct context file paths', () => {
       }),
     } as any;
 
+    // Create real context files on disk.
+    const contentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctx-inline-'));
+    const baseDir = path.join(contentDir, 'discord', 'base');
+    const channelsDir = path.join(contentDir, 'discord', 'channels');
+    await fs.mkdir(baseDir, { recursive: true });
+    await fs.mkdir(channelsDir, { recursive: true });
+    await fs.writeFile(path.join(baseDir, 'core.md'), '# Core context', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'safety.md'), '# Safety rules', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'self-awareness.md'), '# Self awareness', 'utf-8');
+    await fs.writeFile(path.join(channelsDir, 'general.md'), '# General channel', 'utf-8');
+
     const discordChannelContext = {
-      contentDir: '/content',
-      indexPath: '/content/discord/DISCORD.md',
-      baseDir: '/content/discord/base',
-      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md', '/content/discord/base/self-awareness.md'],
+      contentDir,
+      indexPath: path.join(contentDir, 'discord', 'DISCORD.md'),
+      baseDir,
+      baseFiles: [path.join(baseDir, 'core.md'), path.join(baseDir, 'safety.md'), path.join(baseDir, 'self-awareness.md')],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
-      channelsDir: '/content/discord/channels',
-      byChannelId: new Map([['chan', { channelId: 'chan', channelName: 'general', contextPath: '/content/discord/channels/general.md' }]]),
-      dmContextPath: '/content/discord/channels/dm.md',
+      channelsDir,
+      byChannelId: new Map([['chan', { channelId: 'chan', channelName: 'general', contextPath: path.join(channelsDir, 'general.md') }]]),
+      dmContextPath: path.join(channelsDir, 'dm.md'),
     };
 
     const handler = createMessageCreateHandler({
@@ -110,9 +121,11 @@ describe('prompt includes correct context file paths', () => {
     await handler(makeMsg({ channelId: 'chan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(seenPrompt).toContain('- /content/discord/base/core.md');
-    expect(seenPrompt).toContain('- /content/discord/base/safety.md');
-    expect(seenPrompt).toContain('- /content/discord/channels/general.md');
+    // File contents should be inlined, not listed as paths.
+    expect(seenPrompt).toContain('# Core context');
+    expect(seenPrompt).toContain('# Safety rules');
+    expect(seenPrompt).toContain('# General channel');
+    expect(seenPrompt).not.toContain('Context files (read with Read tool');
     expect(seenPrompt).toContain('User message:\nhello');
   });
 
@@ -126,16 +139,26 @@ describe('prompt includes correct context file paths', () => {
       }),
     } as any;
 
+    const contentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctx-inline-'));
+    const baseDir = path.join(contentDir, 'discord', 'base');
+    const channelsDir = path.join(contentDir, 'discord', 'channels');
+    await fs.mkdir(baseDir, { recursive: true });
+    await fs.mkdir(channelsDir, { recursive: true });
+    await fs.writeFile(path.join(baseDir, 'core.md'), '# Core context', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'safety.md'), '# Safety rules', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'self-awareness.md'), '# Self awareness', 'utf-8');
+    await fs.writeFile(path.join(channelsDir, 'general.md'), '# General channel context', 'utf-8');
+
     const discordChannelContext = {
-      contentDir: '/content',
-      indexPath: '/content/discord/DISCORD.md',
-      baseDir: '/content/discord/base',
-      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md', '/content/discord/base/self-awareness.md'],
+      contentDir,
+      indexPath: path.join(contentDir, 'discord', 'DISCORD.md'),
+      baseDir,
+      baseFiles: [path.join(baseDir, 'core.md'), path.join(baseDir, 'safety.md'), path.join(baseDir, 'self-awareness.md')],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
-      channelsDir: '/content/discord/channels',
-      byChannelId: new Map([['parent', { channelId: 'parent', channelName: 'general', contextPath: '/content/discord/channels/general.md' }]]),
-      dmContextPath: '/content/discord/channels/dm.md',
+      channelsDir,
+      byChannelId: new Map([['parent', { channelId: 'parent', channelName: 'general', contextPath: path.join(channelsDir, 'general.md') }]]),
+      dmContextPath: path.join(channelsDir, 'dm.md'),
     };
 
     const handler = createMessageCreateHandler({
@@ -191,7 +214,7 @@ describe('prompt includes correct context file paths', () => {
     }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(seenPrompt).toContain('- /content/discord/channels/general.md');
+    expect(seenPrompt).toContain('# General channel context');
   });
 
   it('DM uses dm context file', async () => {
@@ -204,16 +227,26 @@ describe('prompt includes correct context file paths', () => {
       }),
     } as any;
 
+    const contentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctx-inline-'));
+    const baseDir = path.join(contentDir, 'discord', 'base');
+    const channelsDir = path.join(contentDir, 'discord', 'channels');
+    await fs.mkdir(baseDir, { recursive: true });
+    await fs.mkdir(channelsDir, { recursive: true });
+    await fs.writeFile(path.join(baseDir, 'core.md'), '# Core context', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'safety.md'), '# Safety rules', 'utf-8');
+    await fs.writeFile(path.join(baseDir, 'self-awareness.md'), '# Self awareness', 'utf-8');
+    await fs.writeFile(path.join(channelsDir, 'dm.md'), '# DM channel context', 'utf-8');
+
     const discordChannelContext = {
-      contentDir: '/content',
-      indexPath: '/content/discord/DISCORD.md',
-      baseDir: '/content/discord/base',
-      baseFiles: ['/content/discord/base/core.md', '/content/discord/base/safety.md', '/content/discord/base/self-awareness.md'],
+      contentDir,
+      indexPath: path.join(contentDir, 'discord', 'DISCORD.md'),
+      baseDir,
+      baseFiles: [path.join(baseDir, 'core.md'), path.join(baseDir, 'safety.md'), path.join(baseDir, 'self-awareness.md')],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
-      channelsDir: '/content/discord/channels',
+      channelsDir,
       byChannelId: new Map(),
-      dmContextPath: '/content/discord/channels/dm.md',
+      dmContextPath: path.join(channelsDir, 'dm.md'),
     };
 
     const handler = createMessageCreateHandler({
@@ -266,7 +299,7 @@ describe('prompt includes correct context file paths', () => {
     await handler(makeMsg({ guildId: null, channelId: 'dmchan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    expect(seenPrompt).toContain('- /content/discord/channels/dm.md');
+    expect(seenPrompt).toContain('# DM channel context');
   });
 });
 
@@ -428,16 +461,25 @@ describe('workspace PA files in prompt', () => {
     await fs.writeFile(path.join(workspace, 'IDENTITY.md'), '# Identity', 'utf-8');
     await fs.writeFile(path.join(workspace, 'USER.md'), '# User', 'utf-8');
 
+    // Create real context files for inlining.
+    const contentDir = await fs.mkdtemp(path.join(os.tmpdir(), 'ctx-pa-'));
+    const baseDir = path.join(contentDir, 'discord', 'base');
+    const channelsDir = path.join(contentDir, 'discord', 'channels');
+    await fs.mkdir(baseDir, { recursive: true });
+    await fs.mkdir(channelsDir, { recursive: true });
+    await fs.writeFile(path.join(baseDir, 'core.md'), '# Core', 'utf-8');
+    await fs.writeFile(path.join(channelsDir, 'general.md'), '# General', 'utf-8');
+
     const discordChannelContext = {
-      contentDir: '/content',
-      indexPath: '/content/discord/DISCORD.md',
-      baseDir: '/content/discord/base',
-      baseFiles: ['/content/discord/base/core.md'],
+      contentDir,
+      indexPath: path.join(contentDir, 'discord', 'DISCORD.md'),
+      baseDir,
+      baseFiles: [path.join(baseDir, 'core.md')],
       baseCoreLinkFromChannel: '../base/core.md',
       baseSafetyLinkFromChannel: '../base/safety.md',
-      channelsDir: '/content/discord/channels',
-      byChannelId: new Map([['chan', { channelId: 'chan', channelName: 'general', contextPath: '/content/discord/channels/general.md' }]]),
-      dmContextPath: '/content/discord/channels/dm.md',
+      channelsDir,
+      byChannelId: new Map([['chan', { channelId: 'chan', channelName: 'general', contextPath: path.join(channelsDir, 'general.md') }]]),
+      dmContextPath: path.join(channelsDir, 'dm.md'),
     };
 
     const handler = createMessageCreateHandler({
@@ -490,11 +532,11 @@ describe('workspace PA files in prompt', () => {
     await handler(makeMsg({ channelId: 'chan' }));
 
     expect(runtime.invoke).toHaveBeenCalled();
-    // PA files should appear before base context.
-    const soulIdx = seenPrompt.indexOf('SOUL.md');
-    const identIdx = seenPrompt.indexOf('IDENTITY.md');
-    const userIdx = seenPrompt.indexOf('USER.md');
-    const baseIdx = seenPrompt.indexOf('core.md');
+    // PA file contents should be inlined before base context contents.
+    const soulIdx = seenPrompt.indexOf('# Soul');
+    const identIdx = seenPrompt.indexOf('# Identity');
+    const userIdx = seenPrompt.indexOf('# User');
+    const baseIdx = seenPrompt.indexOf('--- core.md ---');
     expect(soulIdx).toBeGreaterThan(-1);
     expect(identIdx).toBeGreaterThan(-1);
     expect(userIdx).toBeGreaterThan(-1);

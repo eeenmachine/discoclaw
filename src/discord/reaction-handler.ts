@@ -8,7 +8,7 @@ import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { parseDiscordActions, executeDiscordActions, discordActionsPromptSection } from './actions.js';
 import type { ActionCategoryFlags } from './actions.js';
-import { buildContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
+import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, resolveEffectiveTools } from './prompt-common.js';
 import { editThenSendChunks } from './output-common.js';
 import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -201,16 +201,19 @@ function createReactionHandler(
             channelLabel = `#${channelCtx.channelName ?? 'unknown'}`;
           }
 
+          const inlinedContext = await inlineContextFiles(contextFiles);
+
           let prompt =
-            `Context files (read with Read tool before responding, in order):\n` +
-            contextFiles.map((p) => `- ${p}`).join('\n') +
+            (inlinedContext
+              ? inlinedContext + '\n\n'
+              : '') +
             (beadSection
-              ? `\n\n---\n${beadSection}\n`
+              ? `---\n${beadSection}\n\n`
               : '') +
             (durableSection
-              ? `\n\n---\nDurable memory (user-specific notes):\n${durableSection}\n`
+              ? `---\nDurable memory (user-specific notes):\n${durableSection}\n\n`
               : '') +
-            `\n\n---\nReaction event:\n` +
+            `---\nReaction event:\n` +
             promptText.eventLine(reactingUser, user.id, emoji, channelLabel) + `\n\n` +
             `Original message by ${messageAuthor} (ID: ${messageAuthorId}):\n` +
             messageContent;
