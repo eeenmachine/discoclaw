@@ -14,7 +14,7 @@ import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
-import { downloadTextAttachments } from './file-download.js';
+import { downloadTextAttachments, downloadBinaryAttachments, resolveTextType } from './file-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
@@ -232,6 +232,8 @@ function createReactionHandler(
                 msg as any,
                 params.botDisplayName,
                 params.log,
+                0,
+                params.attachmentsDir,
               );
               if (replyRef) {
                 prompt += `\n\nReplied-to message:\n${replyRef.section}`;
@@ -263,23 +265,50 @@ function createReactionHandler(
               params.log?.warn({ err }, `${logPrefix}:image download failed`);
             }
 
-            // Download non-image text attachments.
+            // Download non-image attachments: text files inlined, binary files saved to disk.
             try {
               const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
               if (nonImageAtts.length > 0) {
-                const textResult = await downloadTextAttachments(nonImageAtts);
-                if (textResult.texts.length > 0) {
-                  const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
-                  prompt += '\n\n' + sections.join('\n\n');
-                  params.log?.info({ fileCount: textResult.texts.length }, `${logPrefix}:text attachments downloaded`);
+                const textAtts = nonImageAtts.filter(a => resolveTextType(a));
+                const binaryAtts = nonImageAtts.filter(a => !resolveTextType(a));
+
+                if (textAtts.length > 0) {
+                  const textResult = await downloadTextAttachments(textAtts);
+                  if (textResult.texts.length > 0) {
+                    const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
+                    prompt += '\n\n' + sections.join('\n\n');
+                    params.log?.info({ fileCount: textResult.texts.length }, `${logPrefix}:text attachments downloaded`);
+                  }
+                  if (textResult.errors.length > 0) {
+                    prompt += '\n(' + textResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: textResult.errors }, `${logPrefix}:text attachment notes`);
+                  }
                 }
-                if (textResult.errors.length > 0) {
-                  prompt += '\n(' + textResult.errors.join('; ') + ')';
-                  params.log?.info({ errors: textResult.errors }, `${logPrefix}:text attachment notes`);
+
+                if (binaryAtts.length > 0 && params.attachmentsDir) {
+                  const binResult = await downloadBinaryAttachments(binaryAtts, params.attachmentsDir);
+                  if (binResult.files.length > 0) {
+                    const fileLines = binResult.files.map(f =>
+                      `[Attached file: ${f.name}] saved to ${f.path} — use Read to access it`,
+                    );
+                    prompt += '\n\n' + fileLines.join('\n');
+                    params.log?.info({ fileCount: binResult.files.length }, `${logPrefix}:binary attachments downloaded`);
+                  }
+                  if (binResult.errors.length > 0) {
+                    prompt += '\n(' + binResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: binResult.errors }, `${logPrefix}:binary attachment notes`);
+                  }
+                } else if (binaryAtts.length > 0) {
+                  const notes = binaryAtts.map(a => {
+                    const name = (a.name ?? 'unknown').replace(/[\x00-\x1f]/g, '').slice(0, 100).trim() || 'unknown';
+                    const mime = a.contentType?.split(';')[0].trim() ?? 'unknown';
+                    return `[Unsupported attachment: ${name} (${mime})]`;
+                  });
+                  prompt += '\n(' + notes.join('; ') + ')';
                 }
               }
             } catch (err) {
-              params.log?.warn({ err }, `${logPrefix}:text attachment download failed`);
+              params.log?.warn({ err }, `${logPrefix}:file attachment download failed`);
             }
           }
 

@@ -2,7 +2,7 @@ import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import type { AttachmentLike } from './image-download.js';
-import { downloadTextAttachments } from './file-download.js';
+import { downloadTextAttachments, downloadBinaryAttachments, resolveTextType } from './file-download.js';
 import type { LoggerLike } from './action-types.js';
 
 export type ReplyReferenceResult = {
@@ -45,6 +45,7 @@ export async function resolveReplyReference(
   botDisplayName: string | undefined,
   log?: LoggerLike,
   usedImages: number = 0,
+  attachmentsDir?: string,
 ): Promise<ReplyReferenceResult | null> {
   const refId = msg.reference?.messageId;
   if (!refId) return null;
@@ -98,20 +99,38 @@ export async function resolveReplyReference(
       }
     }
 
-    // Download text file attachments from the referenced message
+    // Download text and binary file attachments from the referenced message
     let files: Array<{ name: string; content: string }> = [];
+    let binaryFiles: Array<{ name: string; path: string }> = [];
     const attachmentNotes: string[] = [];
     if (nonImageAttachments.length > 0) {
       try {
-        const textResult = await downloadTextAttachments(nonImageAttachments);
-        files = textResult.texts;
-        if (textResult.errors.length > 0) {
-          for (const e of textResult.errors) attachmentNotes.push(e);
-          log?.warn({ errors: textResult.errors }, 'discord:reply-ref text download notes');
+        const textAtts = nonImageAttachments.filter(a => resolveTextType(a));
+        const binaryAtts = nonImageAttachments.filter(a => !resolveTextType(a));
+
+        if (textAtts.length > 0) {
+          const textResult = await downloadTextAttachments(textAtts);
+          files = textResult.texts;
+          if (textResult.errors.length > 0) {
+            for (const e of textResult.errors) attachmentNotes.push(e);
+            log?.warn({ errors: textResult.errors }, 'discord:reply-ref text download notes');
+          }
+        }
+
+        if (binaryAtts.length > 0 && attachmentsDir) {
+          const binResult = await downloadBinaryAttachments(binaryAtts, attachmentsDir);
+          binaryFiles = binResult.files;
+          if (binResult.errors.length > 0) {
+            for (const e of binResult.errors) attachmentNotes.push(e);
+            log?.warn({ errors: binResult.errors }, 'discord:reply-ref binary download notes');
+          }
+        } else if (binaryAtts.length > 0) {
+          for (const att of binaryAtts) {
+            attachmentNotes.push(`[attachment: ${att.name ?? 'unknown'}]`);
+          }
         }
       } catch (err) {
-        log?.warn({ err }, 'discord:reply-ref text download failed');
-        // Fall back to listing attachment names
+        log?.warn({ err }, 'discord:reply-ref file download failed');
         for (const att of nonImageAttachments) {
           attachmentNotes.push(`[attachment: ${att.name ?? 'unknown'}]`);
         }
@@ -134,6 +153,12 @@ export async function resolveReplyReference(
     if (files.length > 0) {
       const fileSections = files.map(f => `[Attached file: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\``);
       section += '\n\n' + fileSections.join('\n\n');
+    }
+    if (binaryFiles.length > 0) {
+      const fileLines = binaryFiles.map(f =>
+        `[Attached file: ${f.name}] saved to ${f.path} — use Read to access it`,
+      );
+      section += '\n\n' + fileLines.join('\n');
     }
     if (attachmentNotes.length > 0) {
       section += '\n' + attachmentNotes.join('; ');

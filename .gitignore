@@ -12,6 +12,7 @@ var
 data/*.json
 data/*.pid
 data/memory/
+data/attachments/
 *.log
 
 # Local Claude Code state (skills installs, etc.)

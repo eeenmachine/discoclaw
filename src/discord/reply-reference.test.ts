@@ -87,14 +87,14 @@ describe('resolveReplyReference', () => {
     expect(result!.section).toContain('[dave123 (ID: 111)]: yo');
   });
 
-  it('notes unsupported attachments inline', async () => {
+  it('notes unsupported attachments inline when no attachmentsDir', async () => {
     const atts = new Map([
       ['1', { url: 'https://cdn.discordapp.com/a.pdf', name: 'report.pdf', contentType: 'application/pdf', size: 100 }],
     ]);
     const msg = makeMsg({ refId: '999', refContent: 'see attached', refAttachments: atts });
     const result = await resolveReplyReference(msg, 'Weston');
 
-    expect(result!.section).toContain('Unsupported attachment: report.pdf');
+    expect(result!.section).toContain('[attachment: report.pdf]');
     expect(result!.images).toHaveLength(0);
     expect(result!.files).toHaveLength(0);
   });

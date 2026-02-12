@@ -1,3 +1,6 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { AttachmentLike } from './image-download.js';
 
 // Keep in sync with image-download.ts
@@ -346,4 +349,154 @@ export async function downloadTextAttachments(
   }
 
   return { texts, errors };
+}
+
+// ── Binary (non-text, non-image) file download to disk ──────────────────
+
+/** Max bytes per binary file (50 MB). */
+const MAX_BINARY_FILE_BYTES = 50 * 1024 * 1024;
+
+/** Max total bytes across all binary files in one message (100 MB). */
+const MAX_BINARY_TOTAL_BYTES = 100 * 1024 * 1024;
+
+/** Max age for cached attachment files (1 hour). */
+const ATTACHMENT_MAX_AGE_MS = 60 * 60 * 1000;
+
+export type BinaryDownloadResult = {
+  files: Array<{ name: string; path: string }>;
+  errors: string[];
+};
+
+/**
+ * Sanitize a filename for the filesystem: strip directory traversal,
+ * control characters, and keep it to a reasonable length.
+ */
+function safeFilename(raw: string): string {
+  return raw
+    .replace(/[\x00-\x1f]/g, '')
+    .replace(/[/\\]/g, '_')
+    .slice(0, 100)
+    .trim() || 'attachment';
+}
+
+/**
+ * Download binary (non-text, non-image) attachments to a directory on disk.
+ *
+ * Files are saved as `<uuid>-<safe-filename>` under `destDir` so the AI runtime
+ * can access them via the Read tool (e.g. PDFs). The caller should include the
+ * file path in the prompt.
+ */
+export async function downloadBinaryAttachments(
+  attachments: AttachmentLike[],
+  destDir: string,
+): Promise<BinaryDownloadResult> {
+  if (attachments.length === 0) return { files: [], errors: [] };
+
+  await fs.mkdir(destDir, { recursive: true });
+
+  const files: Array<{ name: string; path: string }> = [];
+  const errors: string[] = [];
+  let totalBytes = 0;
+
+  for (const att of attachments) {
+    const name = safeName(att);
+
+    // Total budget check.
+    if (totalBytes >= MAX_BINARY_TOTAL_BYTES) {
+      errors.push(`${name}: skipped (total size limit exceeded)`);
+      continue;
+    }
+
+    // Pre-check size from Discord metadata.
+    const metaSize = att.size ?? 0;
+    if (metaSize > MAX_BINARY_FILE_BYTES) {
+      const sizeMB = (metaSize / (1024 * 1024)).toFixed(1);
+      errors.push(`${name}: too large (${sizeMB} MB, max 50 MB)`);
+      continue;
+    }
+    if (metaSize > 0 && totalBytes + metaSize > MAX_BINARY_TOTAL_BYTES) {
+      errors.push(`${name}: skipped (total size limit exceeded)`);
+      continue;
+    }
+
+    // SSRF protection.
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(att.url);
+    } catch {
+      errors.push(`${name}: invalid URL`);
+      continue;
+    }
+
+    if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+      errors.push(`${name}: blocked (non-Discord CDN host)`);
+      continue;
+    }
+
+    try {
+      const response = await fetch(att.url, {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+        redirect: 'error',
+      });
+
+      if (!response.ok) {
+        errors.push(`${name}: HTTP ${response.status}`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      if (buffer.length > MAX_BINARY_FILE_BYTES) {
+        const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
+        errors.push(`${name}: too large (${sizeMB} MB, max 50 MB)`);
+        continue;
+      }
+
+      totalBytes += buffer.length;
+
+      const destFilename = `${randomUUID().slice(0, 8)}-${safeFilename(att.name ?? 'attachment')}`;
+      const destPath = path.join(destDir, destFilename);
+      await fs.writeFile(destPath, buffer);
+
+      files.push({ name, path: destPath });
+    } catch (err: unknown) {
+      const errObj = err instanceof Error ? err : null;
+      if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
+        errors.push(`${name}: download timed out`);
+      } else if (errObj?.name === 'TypeError' && String(errObj.message).includes('redirect')) {
+        errors.push(`${name}: blocked (unexpected redirect)`);
+      } else {
+        errors.push(`${name}: download failed`);
+      }
+    }
+  }
+
+  return { files, errors };
+}
+
+/**
+ * Remove attachment files older than maxAgeMs from a directory.
+ * Best-effort: errors are silently ignored.
+ */
+export async function cleanupOldAttachments(dir: string, maxAgeMs: number = ATTACHMENT_MAX_AGE_MS): Promise<number> {
+  let cleaned = 0;
+  try {
+    const entries = await fs.readdir(dir);
+    const cutoff = Date.now() - maxAgeMs;
+    for (const entry of entries) {
+      try {
+        const filePath = path.join(dir, entry);
+        const stat = await fs.stat(filePath);
+        if (stat.isFile() && stat.mtimeMs < cutoff) {
+          await fs.unlink(filePath);
+          cleaned++;
+        }
+      } catch {
+        // ignore per-file errors
+      }
+    }
+  } catch {
+    // directory may not exist yet
+  }
+  return cleaned;
 }

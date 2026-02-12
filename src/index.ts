@@ -35,6 +35,7 @@ import { parseConfig } from './config.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
 import { setDataFilePath, drainInFlightReplies, cleanupOrphanedReplies } from './discord/inflight-replies.js';
+import { cleanupOldAttachments } from './discord/file-download.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 
@@ -197,6 +198,9 @@ const defaultWorkspaceCwd = dataDir
 const workspaceCwd = cfg.workspaceCwdOverride || defaultWorkspaceCwd;
 const groupsDir = cfg.groupsDirOverride || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = cfg.useGroupDirCwd;
+const attachmentsDir = dataDir
+  ? path.join(dataDir, 'attachments')
+  : path.join(__dirname, '..', 'data', 'attachments');
 
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
@@ -455,6 +459,7 @@ const botParams = {
   },
   metrics: globalMetrics,
   appendSystemPrompt,
+  attachmentsDir,
 };
 
 const { client, status, system } = await startDiscordBot(botParams);
@@ -696,5 +701,15 @@ if (reactionHandlerEnabled) {
 if (reactionRemoveHandlerEnabled) {
   log.info({ reactionMaxAgeHours }, 'reaction-remove:handler enabled');
 }
+
+// --- Periodic cleanup of downloaded attachment files (every 30 minutes) ---
+const ATTACHMENT_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
+setInterval(() => {
+  cleanupOldAttachments(attachmentsDir).then((count) => {
+    if (count > 0) log.info({ count, dir: attachmentsDir }, 'attachments:cleanup');
+  }).catch(() => {});
+}, ATTACHMENT_CLEANUP_INTERVAL_MS);
+// Run once at startup too.
+cleanupOldAttachments(attachmentsDir).catch(() => {});
 
 log.info('Discord bot started');

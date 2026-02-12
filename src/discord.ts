@@ -38,7 +38,7 @@ import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/sho
 import { editThenSendChunks } from './discord/output-common.js';
 import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
 import { resolveReplyReference } from './discord/reply-reference.js';
-import { downloadTextAttachments } from './discord/file-download.js';
+import { downloadTextAttachments, downloadBinaryAttachments, cleanupOldAttachments, resolveTextType } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
@@ -126,6 +126,8 @@ export type BotParams = {
   appendSystemPrompt?: string;
   existingCronsId?: string;
   existingBeadsId?: string;
+  /** Directory for downloaded binary attachments (PDFs, etc.). */
+  attachmentsDir?: string;
 };
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -583,7 +585,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               beadCtx: params.beadCtx,
               log: params.log,
             }),
-            resolveReplyReference(msg, params.botDisplayName, params.log),
+            resolveReplyReference(msg, params.botDisplayName, params.log, 0, params.attachmentsDir),
           ]);
 
           const inlinedContext = await inlineContextFiles(
@@ -678,23 +680,54 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               params.log?.warn({ err }, 'discord:image download failed');
             }
 
-            // Download non-image text attachments.
+            // Download non-image attachments: text files are inlined, binary files saved to disk.
             try {
               const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
               if (nonImageAtts.length > 0) {
-                const textResult = await downloadTextAttachments(nonImageAtts);
-                if (textResult.texts.length > 0) {
-                  const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
-                  prompt += '\n\n' + sections.join('\n\n');
-                  params.log?.info({ fileCount: textResult.texts.length }, 'discord:text attachments downloaded');
+                // Separate text-decodable files from binary files.
+                const textAtts = nonImageAtts.filter(a => resolveTextType(a));
+                const binaryAtts = nonImageAtts.filter(a => !resolveTextType(a));
+
+                // Inline text files into the prompt.
+                if (textAtts.length > 0) {
+                  const textResult = await downloadTextAttachments(textAtts);
+                  if (textResult.texts.length > 0) {
+                    const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
+                    prompt += '\n\n' + sections.join('\n\n');
+                    params.log?.info({ fileCount: textResult.texts.length }, 'discord:text attachments downloaded');
+                  }
+                  if (textResult.errors.length > 0) {
+                    prompt += '\n(' + textResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
+                  }
                 }
-                if (textResult.errors.length > 0) {
-                  prompt += '\n(' + textResult.errors.join('; ') + ')';
-                  params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
+
+                // Download binary files (PDFs, etc.) to disk so Claude can Read them.
+                if (binaryAtts.length > 0 && params.attachmentsDir) {
+                  const binResult = await downloadBinaryAttachments(binaryAtts, params.attachmentsDir);
+                  if (binResult.files.length > 0) {
+                    const fileLines = binResult.files.map(f =>
+                      `[Attached file: ${f.name}] saved to ${f.path} — use Read to access it`,
+                    );
+                    prompt += '\n\n' + fileLines.join('\n');
+                    params.log?.info({ fileCount: binResult.files.length }, 'discord:binary attachments downloaded');
+                  }
+                  if (binResult.errors.length > 0) {
+                    prompt += '\n(' + binResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: binResult.errors }, 'discord:binary attachment notes');
+                  }
+                } else if (binaryAtts.length > 0) {
+                  // No attachmentsDir configured — fall back to noting them.
+                  const notes = binaryAtts.map(a => {
+                    const name = (a.name ?? 'unknown').replace(/[\x00-\x1f]/g, '').slice(0, 100).trim() || 'unknown';
+                    const mime = a.contentType?.split(';')[0].trim() ?? 'unknown';
+                    return `[Unsupported attachment: ${name} (${mime})]`;
+                  });
+                  prompt += '\n(' + notes.join('; ') + ')';
                 }
               }
             } catch (err) {
-              params.log?.warn({ err }, 'discord:text attachment download failed');
+              params.log?.warn({ err }, 'discord:file attachment download failed');
             }
           }
 

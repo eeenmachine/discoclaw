@@ -1,5 +1,8 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { resolveTextType, isTextType, classifyAttachments, downloadTextAttachments } from './file-download.js';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { resolveTextType, isTextType, classifyAttachments, downloadTextAttachments, downloadBinaryAttachments, cleanupOldAttachments } from './file-download.js';
 import type { AttachmentLike } from './image-download.js';
 
 function makeAtt(name: string, contentType: string | null, size: number = 100): AttachmentLike {
@@ -381,5 +384,158 @@ describe('downloadTextAttachments', () => {
 
     expect(result.texts).toHaveLength(1);
     expect(result.texts[0].content).toBe('{"key":"value"}');
+  });
+});
+
+describe('downloadBinaryAttachments', () => {
+  const originalFetch = globalThis.fetch;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    globalThis.fetch = vi.fn();
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-test-'));
+  });
+
+  afterEach(async () => {
+    globalThis.fetch = originalFetch;
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('downloads a binary file to disk', async () => {
+    const pdfBytes = Buffer.from('%PDF-1.4 fake pdf');
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength)),
+    });
+
+    const result = await downloadBinaryAttachments(
+      [makeAtt('report.pdf', 'application/pdf', 17)],
+      tmpDir,
+    );
+
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].name).toBe('report.pdf');
+    expect(result.files[0].path).toContain('report.pdf');
+    expect(result.errors).toHaveLength(0);
+
+    // Verify file exists on disk
+    const content = await fs.readFile(result.files[0].path);
+    expect(content.toString()).toBe('%PDF-1.4 fake pdf');
+  });
+
+  it('blocks non-Discord CDN URLs (SSRF)', async () => {
+    const att: AttachmentLike = {
+      url: 'https://evil.com/payload.pdf',
+      name: 'payload.pdf',
+      contentType: 'application/pdf',
+      size: 100,
+    };
+
+    const result = await downloadBinaryAttachments([att], tmpDir);
+
+    expect(result.files).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('blocked');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects files exceeding size limit', async () => {
+    const result = await downloadBinaryAttachments(
+      [makeAtt('huge.bin', 'application/octet-stream', 60 * 1024 * 1024)],
+      tmpDir,
+    );
+
+    expect(result.files).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('too large');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('handles HTTP errors', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 403 });
+
+    const result = await downloadBinaryAttachments(
+      [makeAtt('secret.pdf', 'application/pdf', 100)],
+      tmpDir,
+    );
+
+    expect(result.files).toHaveLength(0);
+    expect(result.errors[0]).toContain('HTTP 403');
+  });
+
+  it('handles download timeout', async () => {
+    const timeoutErr = new DOMException('signal timed out', 'TimeoutError');
+    (globalThis.fetch as any).mockRejectedValue(timeoutErr);
+
+    const result = await downloadBinaryAttachments(
+      [makeAtt('slow.pdf', 'application/pdf', 100)],
+      tmpDir,
+    );
+
+    expect(result.files).toHaveLength(0);
+    expect(result.errors[0]).toContain('timed out');
+  });
+
+  it('returns empty for empty input', async () => {
+    const result = await downloadBinaryAttachments([], tmpDir);
+    expect(result.files).toHaveLength(0);
+    expect(result.errors).toHaveLength(0);
+  });
+
+  it('creates destDir if it does not exist', async () => {
+    const nested = path.join(tmpDir, 'sub', 'dir');
+    const pdfBytes = Buffer.from('%PDF');
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength)),
+    });
+
+    const result = await downloadBinaryAttachments(
+      [makeAtt('doc.pdf', 'application/pdf', 4)],
+      nested,
+    );
+
+    expect(result.files).toHaveLength(1);
+    const stat = await fs.stat(nested);
+    expect(stat.isDirectory()).toBe(true);
+  });
+});
+
+describe('cleanupOldAttachments', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-cleanup-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('removes files older than maxAgeMs', async () => {
+    const oldFile = path.join(tmpDir, 'old.pdf');
+    await fs.writeFile(oldFile, 'old');
+    // Set mtime to 2 hours ago
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    await fs.utimes(oldFile, twoHoursAgo, twoHoursAgo);
+
+    const newFile = path.join(tmpDir, 'new.pdf');
+    await fs.writeFile(newFile, 'new');
+
+    const count = await cleanupOldAttachments(tmpDir, 60 * 60 * 1000);
+
+    expect(count).toBe(1);
+    await expect(fs.stat(oldFile)).rejects.toThrow();
+    await expect(fs.stat(newFile)).resolves.toBeDefined();
+  });
+
+  it('returns 0 for non-existent directory', async () => {
+    const count = await cleanupOldAttachments('/nonexistent/dir');
+    expect(count).toBe(0);
+  });
+
+  it('returns 0 for empty directory', async () => {
+    const count = await cleanupOldAttachments(tmpDir);
+    expect(count).toBe(0);
   });
 });
