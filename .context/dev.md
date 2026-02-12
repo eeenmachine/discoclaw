@@ -120,7 +120,7 @@ Run `pnpm setup` for guided configuration, or copy `.env.example` -> `.env` for 
 | `pnpm dev` | stdout/stderr in your terminal |
 | systemd service | journalctl (`journalctl --user -u discoclaw.service`) |
 
-Discoclaw uses Pino for structured JSON logging. All app logs go to stdout.
+DiscoClaw uses Pino for structured JSON logging. All app logs go to stdout.
 
 ### Quick commands
 

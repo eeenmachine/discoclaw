@@ -1,22 +1,22 @@
 <p align="center">
-  <img src="discoclaw_splash.jpg" alt="Discoclaw" width="700" />
+  <img src="discoclaw_splash.jpg" alt="DiscoClaw" width="700" />
 </p>
 
-# Discoclaw
+# DiscoClaw
 
 A Discord-native AI workspace built on three pillars: **Memory**, **Beads**, and **Crons**.
 
-Discoclaw turns a private Discord server into a persistent AI workspace. Your assistant remembers you across sessions, tracks work in forum threads, and runs scheduled tasks autonomously — all through natural conversation.
+DiscoClaw turns a private Discord server into a persistent AI workspace. Your assistant remembers you across sessions, tracks work in forum threads, and runs scheduled tasks autonomously — all through natural conversation.
 
 It's designed for a single user on a fresh, private server — your own sandbox. Not a shared bot, not a multi-user platform. Just you and your assistant in a space you control.
 
-No gateways, no proxies, no web UI to deploy — Discord *is* the interface. Run the Discoclaw service on a Linux or macOS machine (see [Platform support](#platform-support)) and talk to your assistant from anywhere Discord works: desktop, mobile, browser.
+No gateways, no proxies, no web UI to deploy — Discord *is* the interface. Run the DiscoClaw service on a Linux or macOS machine (see [Platform support](#platform-support)) and talk to your assistant from anywhere Discord works: desktop, mobile, browser.
 
 The codebase is intentionally small — small enough to read, audit, and modify directly. Customization means changing the code, not configuring a plugin system.
 
 ## Why Discord?
 
-Discord gives you channels, forum threads, DMs, mobile access, and rich formatting for free. Discoclaw maps its three core features onto Discord primitives so there's nothing extra to learn — channels become context boundaries, forum threads become task cards and job definitions, and conversation history is the raw material for memory.
+Discord gives you channels, forum threads, DMs, mobile access, and rich formatting for free. DiscoClaw maps its three core features onto Discord primitives so there's nothing extra to learn — channels become context boundaries, forum threads become task cards and job definitions, and conversation history is the raw material for memory.
 
 ## Memory — the bot knows you
 
@@ -54,7 +54,7 @@ Recurring tasks defined as forum threads in plain language — no crontab, no se
 
 ## How it works
 
-Discoclaw is a bridge between Discord and an AI runtime (Claude Code by default). When you send a message, it:
+DiscoClaw is a bridge between Discord and an AI runtime (Claude Code by default). When you send a message, it:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Loads per-channel context, conversation history, rolling summary, and durable memory
@@ -66,7 +66,7 @@ Discoclaw is a bridge between Discord and an AI runtime (Claude Code by default)
 
 ### Shareable integration plans
 
-Discoclaw supports a shareable markdown plan format for passing integrations between users:
+DiscoClaw supports a shareable markdown plan format for passing integrations between users:
 
 - Spec: `docs/discoclaw-plan-spec.md`
 - Template: `templates/plans/integration.discoclaw-plan.md`
@@ -77,7 +77,7 @@ Discoclaw supports a shareable markdown plan format for passing integrations bet
 - Install/refresh invocable skill symlinks:
   - `pnpm claude:install-skills`
 
-Author one plan file for an integration, share it, then let another user's Discoclaw agent consume it and produce a local implementation checklist before coding.
+Author one plan file for an integration, share it, then let another user's DiscoClaw agent consume it and produce a local implementation checklist before coding.
 
 ## Prerequisites
 
@@ -131,7 +131,7 @@ systemctl --user restart discoclaw.service
 
 ## Safety
 
-Discoclaw can execute powerful local tooling via an agent runtime, often with elevated permissions. Treat it like a local automation system connected to Discord.
+DiscoClaw can execute powerful local tooling via an agent runtime, often with elevated permissions. Treat it like a local automation system connected to Discord.
 
 - Use a **private Discord server** — don't start in a shared or public server
 - Use **least-privilege** Discord permissions
@@ -142,7 +142,7 @@ Discoclaw can execute powerful local tooling via an agent runtime, often with el
 
 ## Workspace layout
 
-Discoclaw runs the AI runtime in a separate working directory (`WORKSPACE_CWD`), keeping the repo clean while giving your assistant a persistent workspace.
+DiscoClaw runs the AI runtime in a separate working directory (`WORKSPACE_CWD`), keeping the repo clean while giving your assistant a persistent workspace.
 
 - Set `DISCOCLAW_DATA_DIR` to use `$DISCOCLAW_DATA_DIR/workspace` (good for Dropbox-backed setups)
 - Or leave it unset to use `./workspace` relative to the repo

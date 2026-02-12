@@ -1,4 +1,4 @@
-# Discoclaw Core Inventory
+# DiscoClaw Core Inventory
 
 What ships with the standard project, what's done, and what's left for MVP.
 

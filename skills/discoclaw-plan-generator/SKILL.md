@@ -1,15 +1,15 @@
 ---
 name: discoclaw-plan-generator
-description: Generate a spec-compliant `plans/*.discoclaw-plan.md` file for shareable Discoclaw integrations (runtime, actions, or context), including YAML frontmatter metadata, risk-gated JSON contracts, safety details, and a consumer handoff prompt.
+description: Generate a spec-compliant `plans/*.discoclaw-plan.md` file for shareable DiscoClaw integrations (runtime, actions, or context), including YAML frontmatter metadata, risk-gated JSON contracts, safety details, and a consumer handoff prompt.
 ---
 
-# Discoclaw Plan Generator
+# DiscoClaw Plan Generator
 
-Generate shareable Discoclaw integration plans using `docs/discoclaw-plan-spec.md`.
+Generate shareable DiscoClaw integration plans using `docs/discoclaw-plan-spec.md`.
 
 ## Use This Skill When
 
-- A user asks to create a reusable integration plan for another Discoclaw user.
+- A user asks to create a reusable integration plan for another DiscoClaw user.
 - A user wants a PRD-style handoff file for agent implementation.
 - A user asks for a `.discoclaw-plan.md` scaffold or draft.
 
@@ -21,7 +21,7 @@ Collect only missing values:
 - Integration type: `runtime` | `actions` | `context`
 - Risk level: `low` | `medium` | `high`
 - Author, source, license
-- Target Discoclaw minimum version
+- Target DiscoClaw minimum version
 
 ## Output Contract
 

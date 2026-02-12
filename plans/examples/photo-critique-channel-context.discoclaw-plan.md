@@ -2,7 +2,7 @@
 spec_version: "1.0"
 plan_id: "photo-critique-channel-context"
 title: "Photo Critique Channel Context Preset"
-author: "Discoclaw Community Example"
+author: "DiscoClaw Community Example"
 source: "manual"
 license: "MIT"
 created_at: "2026-02-11T00:00:00Z"
@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "low"
 ---
 
-# Discoclaw Plan
+# DiscoClaw Plan
 
 ## Metadata
 
@@ -61,7 +61,7 @@ Local repo mapping:
 
 Compatibility notes:
 
-- Works as a pure context change for existing Discoclaw versions that support per-channel context files.
+- Works as a pure context change for existing DiscoClaw versions that support per-channel context files.
 
 ## Implementation Steps
 

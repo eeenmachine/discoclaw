@@ -1,6 +1,6 @@
-# Discoclaw Phased Plan (Living Doc)
+# DiscoClaw Phased Plan (Living Doc)
 
-This is the working plan for getting from "fresh start" to a stable, shareable Discoclaw setup.
+This is the working plan for getting from "fresh start" to a stable, shareable DiscoClaw setup.
 
 Guidelines:
 - Keep this file current; check items off as they land.

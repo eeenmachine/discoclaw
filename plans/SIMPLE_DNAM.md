@@ -1,11 +1,11 @@
 # SIMPLE DNAM (Simple Discord-Native Assistant Memory)
 
 ## Summary
-SIMPLE DNAM is a hybrid memory system for Discoclaw:
+SIMPLE DNAM is a hybrid memory system for DiscoClaw:
 - **Durable memory (per Discord user):** structured, low-churn, long-lived facts/preferences/projects with provenance.
 - **Rolling memory (per sessionKey):** token-efficient lossy summary of recent conversation, refreshed periodically.
 
-It keeps Discoclaw “nanoclaw-style” (small, auditable, filesystem-first), uses **Haiku** for updates, avoids Discord-search-as-RAG, and provides optional transparency via a **single** Discord memory channel.
+It keeps DiscoClaw “nanoclaw-style” (small, auditable, filesystem-first), uses **Haiku** for updates, avoids Discord-search-as-RAG, and provides optional transparency via a **single** Discord memory channel.
 
 ## Goals / Non-goals
 Goals:
@@ -22,7 +22,7 @@ Non-goals (for now):
 
 ## Definitions
 - **User key:** Discord user ID (`msg.author.id`). Durable memory is keyed by this.
-- **Session key:** existing Discoclaw `discordSessionKey(...)` (DM vs channel vs thread). Rolling summary is keyed by this.
+- **Session key:** existing DiscoClaw `discordSessionKey(...)` (DM vs channel vs thread). Rolling summary is keyed by this.
 - **Durable item:** a single structured memory entry (preference/fact/project/etc).
 - **Source:** provenance pointer for a durable item (Discord channelId + messageId, or manual).
 
@@ -52,7 +52,7 @@ User is implementing SIMPLE DNAM: durable per-user items + rolling per-session s
 ---
 Recent conversation:
 [NimbleDave]: ...
-[Discoclaw]: ...
+[DiscoClaw]: ...
 
 ---
 User message:
@@ -200,7 +200,7 @@ Safety:
 - If Haiku output contains IDs that don't exist in the store: treat as new inserts (derive fresh ID).
 
 ## User Controls (Explicit, Minimal)
-Handled by Discoclaw before runtime invocation (fast, reliable).
+Handled by DiscoClaw before runtime invocation (fast, reliable).
 
 Commands (suggested prefix `!memory`):
 - `!memory show`
@@ -249,7 +249,7 @@ New (SIMPLE DNAM durable memory):
 - `DISCOCLAW_MEMORY_COMMANDS_ENABLED=1`
 
 ## Failure Modes (Fail Closed / Best-Effort)
-- If allowlist is empty/missing: Discoclaw already fails closed; SIMPLE DNAM must not change that.
+- If allowlist is empty/missing: DiscoClaw already fails closed; SIMPLE DNAM must not change that.
 - If memory read fails: treat as empty and continue.
 - If memory write fails: log warning and continue.
 - If Haiku summarization fails: keep old memory, continue.

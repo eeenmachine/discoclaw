@@ -1,9 +1,9 @@
 # Phase 2: Migration From Weston (Working Notes)
 
-Goal: selectively migrate durable "content" from the legacy Weston Dropbox tree into the new Discoclaw data root.
+Goal: selectively migrate durable "content" from the legacy Weston Dropbox tree into the new DiscoClaw data root.
 
 Principles:
-- Copy only what Discoclaw needs; avoid dragging in build outputs, `node_modules/`, caches, logs, audits.
+- Copy only what DiscoClaw needs; avoid dragging in build outputs, `node_modules/`, caches, logs, audits.
 - Treat legacy as read-only reference (`legacy/weston`).
 - Keep secrets out of Dropbox-backed content. No `.env` files.
 
@@ -39,7 +39,7 @@ Usually do NOT migrate (high churn / heavy / ops-specific):
 
 ## Open Questions
 
-- Should Discoclaw *automatically* prepend per-channel context based on `DISCORD_CHANNEL_IDS` + `content/discord/channels/*.md`?
+- Should DiscoClaw *automatically* prepend per-channel context based on `DISCORD_CHANNEL_IDS` + `content/discord/channels/*.md`?
 - If yes, what is the desired precedence?
   - Per-channel context vs per-session group (`groups/<sessionKey>/CLAUDE.md`) vs workspace `CLAUDE.md`
 

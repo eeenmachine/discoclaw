@@ -26,7 +26,7 @@ See: `src/runtime/types.ts`
   ```
 - The `--` terminator prevents variadic flags (e.g. `--tools`, `--add-dir`) from consuming the positional prompt argument.
 - Output modes:
-  - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; Discoclaw parses JSONL and streams text)
+  - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; DiscoClaw parses JSONL and streams text)
   - `CLAUDE_OUTPUT_FORMAT=text` (fallback if your local CLI doesn't support stream-json)
 
 ## Tool Surface

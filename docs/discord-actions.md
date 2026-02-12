@@ -1,6 +1,6 @@
-# Discoclaw Discord Actions
+# DiscoClaw Discord Actions
 
-Discoclaw supports "Discord Actions": structured JSON blocks embedded in the model's response that the bot parses and executes against the Discord API.
+DiscoClaw supports "Discord Actions": structured JSON blocks embedded in the model's response that the bot parses and executes against the Discord API.
 
 This is intentionally not slash commands. Actions are internal plumbing that let the model do things like create channels, read messages, manage roles, etc, when enabled.
 

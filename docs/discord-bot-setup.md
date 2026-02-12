@@ -1,21 +1,21 @@
-# Discoclaw Discord Bot Setup
+# DiscoClaw Discord Bot Setup
 
 > This is the canonical human-facing setup guide. The agent context module at `.context/bot-setup.md` is a brief reference for Claude — this file is the source of truth.
 
-This walks you through creating a fresh Discord bot for Discoclaw and configuring the repo to use it.
+This walks you through creating a fresh Discord bot for DiscoClaw and configuring the repo to use it.
 
 ## Safety disclaimer (read first)
 
-Discoclaw can drive powerful local automation through an agent runtime connected to Discord.
+DiscoClaw can drive powerful local automation through an agent runtime connected to Discord.
 
 Recommended starting point:
-- Create a **standalone private Discord server** for Discoclaw.
+- Create a **standalone private Discord server** for DiscoClaw.
 - Use **least privilege** bot permissions (avoid `Administrator` unless you explicitly need it).
 - Keep allowlists tight: `DISCORD_ALLOW_USER_IDS` and `DISCORD_CHANNEL_IDS`.
 
 ## 0) Get a private server
 
-If you don't have a private Discord server yet, click the **+** button at the bottom of Discord's server list to create one. Use this dedicated server for Discoclaw — don't start in a shared or public server.
+If you don't have a private Discord server yet, click the **+** button at the bottom of Discord's server list to create one. Use this dedicated server for DiscoClaw — don't start in a shared or public server.
 
 ## 1) Create The Bot
 
@@ -46,7 +46,7 @@ Use the Developer Portal:
 
 ### Permission profiles (choose intentionally)
 
-Discoclaw has 4 common “permission profiles”. You can always re-invite the bot later with a different permission set.
+DiscoClaw has 4 common “permission profiles”. You can always re-invite the bot later with a different permission set.
 
 - **Minimal** (recommended default)
   - What works: read/send messages in channels it can see; reply inside threads it can see.
@@ -82,7 +82,7 @@ Notes:
    - your user -> Copy ID (use this in `DISCORD_ALLOW_USER_IDS`)
    - a channel -> Copy ID (use this in `DISCORD_CHANNEL_IDS`)
 
-## 4) Configure Discoclaw
+## 4) Configure DiscoClaw
 
 ```bash
 pnpm setup     # guided interactive setup
@@ -143,4 +143,4 @@ Run through this checklist in order. Each step should produce the expected outpu
    - Post in a non-allowlisted channel → it should **not** respond.
 
 7. **Channel context auto-scaffold (optional):**
-   - Create a new channel and post once. Discoclaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.
+   - Create a new channel and post once. DiscoClaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.

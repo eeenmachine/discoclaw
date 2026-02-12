@@ -1,8 +1,8 @@
-# Token-Efficient Conversation Memory for Discoclaw
+# Token-Efficient Conversation Memory for DiscoClaw
 
 ## Context
 
-Discoclaw now has a basic sliding window (message history fetch, `DISCOCLAW_MESSAGE_HISTORY_BUDGET`). But the window only covers the last ~10 messages. For a personal assistant that spans months of diverse topics, we need longer-term memory without burning through token budget.
+DiscoClaw now has a basic sliding window (message history fetch, `DISCOCLAW_MESSAGE_HISTORY_BUDGET`). But the window only covers the last ~10 messages. For a personal assistant that spans months of diverse topics, we need longer-term memory without burning through token budget.
 
 This plan implements **rolling conversation summaries** using Claude Haiku — the most impactful and practical next layer. It complements the existing sliding window by compressing older conversation history into a persistent, budget-capped summary that is prepended to each prompt.
 
@@ -32,7 +32,7 @@ CI notifications in that channel later this week.
 ---
 Recent conversation:
 [NimbleDave]: can you set up the CI notifications now?
-[Discoclaw]: Sure, which CI provider are you using?
+[DiscoClaw]: Sure, which CI provider are you using?
 [NimbleDave]: github actions
 
 ---
@@ -103,7 +103,7 @@ export async function generateSummary(
 
 **Summarization prompt:**
 ```
-You are a conversation summarizer for a Discord assistant called Discoclaw.
+You are a conversation summarizer for a Discord assistant called DiscoClaw.
 Update the running summary with key information from the recent exchange.
 
 Previous summary:
@@ -177,7 +177,7 @@ if (params.summaryEnabled) {
       const exchange =
         (historySection ? historySection + '\n' : '') +
         `[${msg.author.displayName || msg.author.username}]: ${msg.content}\n` +
-        `[Discoclaw]: ${(processedText || '').slice(0, 500)}`;
+        `[DiscoClaw]: ${(processedText || '').slice(0, 500)}`;
 
       const newSummary = await generateSummary(params.runtime, {
         previousSummary: existingSummary,

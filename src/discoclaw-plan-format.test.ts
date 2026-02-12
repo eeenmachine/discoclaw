@@ -8,7 +8,7 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.join(__dirname, '..');
 
 const REQUIRED_HEADINGS = [
-  '# Discoclaw Plan',
+  '# DiscoClaw Plan',
   '## Metadata',
   '## Use Case',
   '## Scope',

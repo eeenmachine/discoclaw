@@ -2,7 +2,7 @@
 spec_version: "1.0"
 plan_id: "auto-thread-welcome-action"
 title: "Auto Thread Welcome Message Action"
-author: "Discoclaw Community Example"
+author: "DiscoClaw Community Example"
 source: "manual"
 license: "MIT"
 created_at: "2026-02-11T00:00:00Z"
@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "medium"
 ---
 
-# Discoclaw Plan
+# DiscoClaw Plan
 
 ## Metadata
 
@@ -19,7 +19,7 @@ Canonical metadata lives in YAML frontmatter.
 
 ## Use Case
 
-A user wants Discoclaw to post a short policy or onboarding note when a new thread is created in selected channels.
+A user wants DiscoClaw to post a short policy or onboarding note when a new thread is created in selected channels.
 
 ## Scope
 

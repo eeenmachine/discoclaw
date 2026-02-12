@@ -2,7 +2,7 @@
 spec_version: "1.0"
 plan_id: "openai-compatible-runtime-adapter"
 title: "OpenAI-Compatible Runtime Adapter"
-author: "Discoclaw Community Example"
+author: "DiscoClaw Community Example"
 source: "manual"
 license: "MIT"
 created_at: "2026-02-11T00:00:00Z"
@@ -11,7 +11,7 @@ discoclaw_min_version: "0.1.0"
 risk_level: "medium"
 ---
 
-# Discoclaw Plan
+# DiscoClaw Plan
 
 ## Metadata
 
@@ -19,7 +19,7 @@ Canonical metadata lives in YAML frontmatter.
 
 ## Use Case
 
-A user wants to run Discoclaw against an OpenAI-compatible endpoint while preserving the existing runtime abstraction and safety defaults.
+A user wants to run DiscoClaw against an OpenAI-compatible endpoint while preserving the existing runtime abstraction and safety defaults.
 
 ## Scope
 

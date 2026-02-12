@@ -1,6 +1,6 @@
 # Architecture
 
-Discoclaw is a minimal Discord bridge that routes messages to AI runtimes
+DiscoClaw is a minimal Discord bridge that routes messages to AI runtimes
 (Claude Code first; others later). It emphasizes small, explicit, auditable code.
 
 ## Data Flow

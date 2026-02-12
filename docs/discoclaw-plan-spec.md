@@ -1,6 +1,6 @@
-# Discoclaw Plan Specification v1
+# DiscoClaw Plan Specification v1
 
-`discoclaw-plan` is a shareable markdown scaffold for describing integration work that another Discoclaw user (or agent) can safely implement.
+`discoclaw-plan` is a shareable markdown scaffold for describing integration work that another DiscoClaw user (or agent) can safely implement.
 
 ## Goals
 
@@ -68,7 +68,7 @@ Frontmatter must include all fields below:
 
 Every file must include these headings exactly once:
 
-1. `# Discoclaw Plan`
+1. `# DiscoClaw Plan`
 2. `## Metadata`
 3. `## Use Case`
 4. `## Scope`

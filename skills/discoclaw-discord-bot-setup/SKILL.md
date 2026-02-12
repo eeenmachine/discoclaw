@@ -1,14 +1,14 @@
 ---
 name: discoclaw-discord-bot-setup
-description: Create and invite a Discoclaw Discord bot to a server, configure required intents/permissions, and generate/verify local .env settings for Discoclaw. Use when setting up Discoclaw for a new user/server, rotating bot tokens, debugging why the bot cannot read messages (Message Content Intent), or when generating an invite URL for a given client ID.
+description: Create and invite a DiscoClaw Discord bot to a server, configure required intents/permissions, and generate/verify local .env settings for DiscoClaw. Use when setting up DiscoClaw for a new user/server, rotating bot tokens, debugging why the bot cannot read messages (Message Content Intent), or when generating an invite URL for a given client ID.
 ---
 
-# Discoclaw Discord Bot Setup
+# DiscoClaw Discord Bot Setup
 
 Keep this workflow safe and minimal: no secrets in git, fail-closed allowlists, and smallest required Discord permissions.
 
 Safety disclaimer:
-- Recommended: create a **standalone private Discord server** for Discoclaw.
+- Recommended: create a **standalone private Discord server** for DiscoClaw.
 - Prefer **least privilege** permissions; avoid `Administrator` unless you explicitly need it.
 - Keep `DISCORD_ALLOW_USER_IDS` and `DISCORD_CHANNEL_IDS` tight.
 
@@ -69,7 +69,7 @@ pnpm discord:invite-url -- --client-id <CLIENT_ID> --profile minimal --app-comma
 
 Note: Discord does not expose the same full-text “search like the client” via the public bot API; if you want search, you generally need to log/index messages yourself.
 
-## Configure Discoclaw `.env`
+## Configure DiscoClaw `.env`
 
 1. Run `pnpm setup` for guided interactive setup, or:
    `cp .env.example .env` (essentials) / `cp .env.example.full .env` (all options)

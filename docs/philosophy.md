@@ -1,6 +1,6 @@
 # Philosophy
 
-Discoclaw is intentionally small.
+DiscoClaw is intentionally small.
 
 - Favor a tiny, auditable codebase over a feature-rich gateway.
 - Keep the boundary between Discord and model runtimes explicit.

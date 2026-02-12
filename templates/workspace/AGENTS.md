@@ -10,7 +10,7 @@ own conventions, style, and rules as you figure out what works.
 
 You have two memory systems. Use both.
 
-### Programmatic Memory (managed by Discoclaw)
+### Programmatic Memory (managed by DiscoClaw)
 
 - **Durable items** — structured facts stored via `!memory add <note>`, injected into every prompt
 - **Rolling summaries** — conversation history compressed and carried forward between sessions

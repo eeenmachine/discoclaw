@@ -22,7 +22,7 @@ Build/deploy reminder:
 - Optional group CWD: `USE_GROUP_DIR_CWD=1` and `GROUPS_DIR=...`
 
 ## PID Lock (Startup Guard)
-- On startup, Discoclaw writes its PID to `data/discoclaw.pid` and checks for an existing lock.
+- On startup, DiscoClaw writes its PID to `data/discoclaw.pid` and checks for an existing lock.
 - If another live process holds the lock, startup is refused with an error.
 - Stale locks (from `SIGKILL` or crashes) are detected via `kill(pid, 0)` and automatically overwritten.
 - On `SIGTERM` or `SIGINT`, the lock file is released before exit.

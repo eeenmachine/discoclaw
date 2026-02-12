@@ -1,4 +1,4 @@
-# Discoclaw
+# DiscoClaw
 
 <!-- KEEP THIS FILE UNDER 3 KB. Details go in .context/*.md modules. -->
 

@@ -72,7 +72,7 @@ Then create `PERMISSIONS.json` with their choice:
 
 ## Task Tracking
 
-Beads is built into Discoclaw for tracking tasks via Discord forum threads.
+Beads is built into DiscoClaw for tracking tasks via Discord forum threads.
 You can create, update, and close tasks from Discord or the terminal using
 the `bd` CLI. Walk the user through task tracking during your first conversation.
 

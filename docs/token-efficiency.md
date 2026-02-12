@@ -6,7 +6,7 @@ Where tokens go on every API call, and how to keep costs down.
 
 ## 1. Prompt Anatomy — Three Invocation Paths
 
-Discoclaw assembles prompts differently depending on the trigger.
+DiscoClaw assembles prompts differently depending on the trigger.
 
 ### Message prompts (`src/discord.ts`)
 
@@ -45,7 +45,7 @@ No context files, no memory, no history. Very small — prompt length is just th
 
 ### Note on AGENTS.md
 
-`workspace/AGENTS.md` is NOT loaded via `loadWorkspacePaFiles()`. It's discovered by Claude Code's native AGENTS.md mechanism when the workspace is the working directory. It contributes to the Claude Code system prompt, not the Discoclaw-assembled user prompt.
+`workspace/AGENTS.md` is NOT loaded via `loadWorkspacePaFiles()`. It's discovered by Claude Code's native AGENTS.md mechanism when the workspace is the working directory. It contributes to the Claude Code system prompt, not the DiscoClaw-assembled user prompt.
 
 ---
 

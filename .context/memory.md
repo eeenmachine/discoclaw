@@ -70,7 +70,7 @@ User:  !memory show
 Bot:   Durable memory (3 items):
        - [fact] Works at Acme Corp (src: manual)
        - [preference] Prefers Rust over Go for systems work (src: manual)
-       - [project] Building a Discord bot called Discoclaw (src: summary)
+       - [project] Building a Discord bot called DiscoClaw (src: summary)
 
        Rolling summary:
        User discussed adding webhook support to their Fastify migration...

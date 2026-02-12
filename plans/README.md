@@ -1,6 +1,6 @@
-# Discoclaw Plans
+# DiscoClaw Plans
 
-Integration plans that teach an AI agent how to extend Discoclaw.
+Integration plans that teach an AI agent how to extend DiscoClaw.
 See `docs/discoclaw-plan-spec.md` for the format specification.
 
 ## Directories

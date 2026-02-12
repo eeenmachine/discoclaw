@@ -3,9 +3,9 @@ name: discoclaw-plan-consumer
 description: Consume a shared `*.discoclaw-plan.md` file and produce a decision-complete, local-repo implementation checklist with YAML metadata validation, risk-gated contract validation, and plan-first execution behavior.
 ---
 
-# Discoclaw Plan Consumer
+# DiscoClaw Plan Consumer
 
-Consume a shared Discoclaw integration plan without immediately coding.
+Consume a shared DiscoClaw integration plan without immediately coding.
 
 Default mode is plan-first apply.
 

@@ -1,4 +1,4 @@
-# Contributing to Discoclaw
+# Contributing to DiscoClaw
 
 ## Quick Start
 

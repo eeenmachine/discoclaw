@@ -19,7 +19,7 @@ Author instructions (remove before sharing):
 - For medium/high-risk plans, JSON contract blocks are required.
 -->
 
-# Discoclaw Plan
+# DiscoClaw Plan
 
 ## Metadata
 
@@ -34,7 +34,7 @@ Optional notes:
 
 - Problem:
 - Who benefits:
-- What this unlocks for another Discoclaw user:
+- What this unlocks for another DiscoClaw user:
 
 ## Scope
 
@@ -87,7 +87,7 @@ Local repo mapping:
 
 Compatibility notes:
 
-- Minimum Discoclaw version:
+- Minimum DiscoClaw version:
 - Known incompatibilities:
 - Backward-compatible fallback behavior:
 
@@ -151,7 +151,7 @@ Rollback plan:
 
 ## Handoff Prompt (Consumer Agent)
 
-Use this prompt when another Discoclaw user asks their agent to implement this plan:
+Use this prompt when another DiscoClaw user asks their agent to implement this plan:
 
 ```text
 Read this .discoclaw-plan.md file and produce a decision-complete implementation checklist mapped to local repo files. Validate required headings, YAML frontmatter metadata, and risk-gated JSON contract requirements first. Do not start coding until explicitly asked.
