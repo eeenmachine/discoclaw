@@ -151,6 +151,13 @@ const durableDataDir = cfg.durableDataDirOverride
 const durableInjectMaxChars = cfg.durableInjectMaxChars;
 const durableMaxItems = cfg.durableMaxItems;
 const memoryCommandsEnabled = cfg.memoryCommandsEnabled;
+const planCommandsEnabled = cfg.planCommandsEnabled;
+const forgeCommandsEnabled = cfg.forgeCommandsEnabled;
+const forgeMaxAuditRounds = cfg.forgeMaxAuditRounds;
+const forgeDrafterModel = cfg.forgeDrafterModel;
+const forgeAuditorModel = cfg.forgeAuditorModel;
+const forgeTimeoutMs = cfg.forgeTimeoutMs;
+const forgeProgressThrottleMs = cfg.forgeProgressThrottleMs;
 const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
 const shortTermMemoryEnabled = cfg.shortTermMemoryEnabled;
 const shortTermDataDir = cfg.shortTermDataDirOverride
@@ -395,6 +402,13 @@ const botParams = {
   durableInjectMaxChars,
   durableMaxItems,
   memoryCommandsEnabled,
+  planCommandsEnabled,
+  forgeCommandsEnabled,
+  forgeMaxAuditRounds,
+  forgeDrafterModel,
+  forgeAuditorModel,
+  forgeTimeoutMs,
+  forgeProgressThrottleMs,
   summaryToDurableEnabled,
   shortTermMemoryEnabled,
   shortTermDataDir,

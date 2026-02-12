@@ -1,0 +1,438 @@
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  parseForgeCommand,
+  parseAuditVerdict,
+  buildDrafterPrompt,
+  buildAuditorPrompt,
+  buildRevisionPrompt,
+  ForgeOrchestrator,
+} from './forge-commands.js';
+import type { ForgeOrchestratorOpts } from './forge-commands.js';
+import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+
+// Mock the bd-cli module so we don't shell out to the real CLI.
+vi.mock('../beads/bd-cli.js', () => ({
+  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
+  bdClose: vi.fn(async () => {}),
+  bdUpdate: vi.fn(async () => {}),
+  bdAddLabel: vi.fn(async () => {}),
+}));
+
+async function makeTmpDir(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'forge-test-'));
+}
+
+function makeMockRuntime(responses: string[]): RuntimeAdapter {
+  let callIndex = 0;
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke(_params) {
+      const text = responses[callIndex] ?? '(no response)';
+      callIndex++;
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        yield { type: 'text_final', text };
+      })();
+    },
+  };
+}
+
+function makeMockRuntimeWithError(errorOnCall: number, responses: string[]): RuntimeAdapter {
+  let callIndex = 0;
+  return {
+    id: 'claude_code' as const,
+    capabilities: new Set(['streaming_text' as const]),
+    invoke(_params) {
+      const idx = callIndex++;
+      if (idx === errorOnCall) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'error', message: 'Runtime crashed' };
+        })();
+      }
+      const text = responses[idx] ?? '(no response)';
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        yield { type: 'text_final', text };
+      })();
+    },
+  };
+}
+
+async function baseOpts(
+  tmpDir: string,
+  runtime: RuntimeAdapter,
+  overrides: Partial<ForgeOrchestratorOpts> = {},
+): Promise<ForgeOrchestratorOpts> {
+  const plansDir = path.join(tmpDir, 'plans');
+  await fs.mkdir(plansDir, { recursive: true });
+  // Write a minimal template
+  await fs.writeFile(
+    path.join(plansDir, '.plan-template.md'),
+    `# Plan: {{TITLE}}\n\n**ID:** {{PLAN_ID}}\n**Bead:** {{BEAD_ID}}\n**Created:** {{DATE}}\n**Status:** DRAFT\n**Project:** {{PROJECT}}\n\n---\n\n## Objective\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`,
+  );
+  return {
+    runtime,
+    model: 'test-model',
+    cwd: tmpDir,
+    workspaceCwd: tmpDir,
+    beadsCwd: tmpDir,
+    plansDir,
+    maxAuditRounds: 5,
+    progressThrottleMs: 0,
+    timeoutMs: 30000,
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// parseForgeCommand
+// ---------------------------------------------------------------------------
+
+describe('parseForgeCommand', () => {
+  it('returns null for non-forge messages', () => {
+    expect(parseForgeCommand('hello world')).toBeNull();
+    expect(parseForgeCommand('!plan create something')).toBeNull();
+    expect(parseForgeCommand('!memory show')).toBeNull();
+    expect(parseForgeCommand('')).toBeNull();
+  });
+
+  it('returns null for !forging or !forger (prefix collision)', () => {
+    expect(parseForgeCommand('!forging something')).toBeNull();
+    expect(parseForgeCommand('!forger')).toBeNull();
+  });
+
+  it('!forge with no args returns help', () => {
+    expect(parseForgeCommand('!forge')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('!forge with extra whitespace returns help', () => {
+    expect(parseForgeCommand('  !forge  ')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('parses create from description text', () => {
+    expect(parseForgeCommand('!forge build a webhook retry system')).toEqual({
+      action: 'create',
+      args: 'build a webhook retry system',
+    });
+  });
+
+  it('parses status as reserved subcommand', () => {
+    expect(parseForgeCommand('!forge status')).toEqual({ action: 'status', args: '' });
+  });
+
+  it('parses cancel as reserved subcommand', () => {
+    expect(parseForgeCommand('!forge cancel')).toEqual({ action: 'cancel', args: '' });
+  });
+
+  it('parses help explicitly', () => {
+    expect(parseForgeCommand('!forge help')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('treats unknown first word as create description', () => {
+    expect(parseForgeCommand('!forge add rate limiting')).toEqual({
+      action: 'create',
+      args: 'add rate limiting',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseAuditVerdict
+// ---------------------------------------------------------------------------
+
+describe('parseAuditVerdict', () => {
+  it('text containing "Severity: high" -> high, shouldLoop', () => {
+    const text = '**Concern 1: Missing error handling**\n**Severity: high**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+  });
+
+  it('text containing "Severity: medium" -> medium, shouldLoop', () => {
+    const text = '**Concern 1: Unclear scope**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'medium', shouldLoop: true });
+  });
+
+  it('text containing only "Severity: low" -> low, no loop', () => {
+    const text = '**Concern 1: Minor naming**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+  });
+
+  it('"Ready to approve" with no severity markers -> low, no loop', () => {
+    const text = 'No concerns found.\n\n**Verdict:** Ready to approve.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'low', shouldLoop: false });
+  });
+
+  it('empty text -> none, no loop', () => {
+    expect(parseAuditVerdict('')).toEqual({ maxSeverity: 'none', shouldLoop: false });
+  });
+
+  it('whitespace-only text -> none, no loop', () => {
+    expect(parseAuditVerdict('   \n  ')).toEqual({ maxSeverity: 'none', shouldLoop: false });
+  });
+
+  it('malformed text with no markers -> none, no loop', () => {
+    expect(parseAuditVerdict('This plan looks interesting.')).toEqual({
+      maxSeverity: 'none',
+      shouldLoop: false,
+    });
+  });
+
+  it('high takes precedence over medium', () => {
+    const text = '**Severity: medium**\n**Severity: high**\n**Verdict:** Needs revision.';
+    expect(parseAuditVerdict(text)).toEqual({ maxSeverity: 'high', shouldLoop: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildDrafterPrompt / buildAuditorPrompt / buildRevisionPrompt
+// ---------------------------------------------------------------------------
+
+describe('buildDrafterPrompt', () => {
+  it('includes description, template, and context', () => {
+    const prompt = buildDrafterPrompt('Add rate limiting', '## Template', 'Some context');
+    expect(prompt).toContain('Add rate limiting');
+    expect(prompt).toContain('## Template');
+    expect(prompt).toContain('Some context');
+    expect(prompt).toContain('Read the codebase');
+  });
+});
+
+describe('buildAuditorPrompt', () => {
+  it('includes plan content and structured instructions', () => {
+    const prompt = buildAuditorPrompt('# Plan: Test\n\n## Objective\nDo stuff.', 1);
+    expect(prompt).toContain('# Plan: Test');
+    expect(prompt).toContain('Severity: high | medium | low');
+    expect(prompt).toContain('audit round 1');
+  });
+});
+
+describe('buildRevisionPrompt', () => {
+  it('includes plan, audit notes, and description', () => {
+    const prompt = buildRevisionPrompt('# Plan: Test', 'Concern 1: bad thing', 'Add feature');
+    expect(prompt).toContain('# Plan: Test');
+    expect(prompt).toContain('Concern 1: bad thing');
+    expect(prompt).toContain('Add feature');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ForgeOrchestrator
+// ---------------------------------------------------------------------------
+
+describe('ForgeOrchestrator', () => {
+  it('completes in 1 round when audit returns clean', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Concern 1: Minor naming**\n**Severity: low**\n\n**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.planId).toMatch(/^plan-001$/);
+    expect(result.rounds).toBe(1);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(result.error).toBeUndefined();
+    expect(progress.some((p) => p.includes('Draft complete'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('completes in 2 rounds when first audit has medium concerns', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\nStuff.\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditMedium = '**Concern 1: Missing details**\n**Severity: medium**\n\n**Verdict:** Needs revision.';
+    const revisedPlan = draftPlan; // Same structure, orchestrator handles merge
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    // Draft -> Audit (medium) -> Revise -> Audit (clean)
+    const runtime = makeMockRuntime([draftPlan, auditMedium, revisedPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.rounds).toBe(2);
+    expect(result.reachedMaxRounds).toBe(false);
+    expect(progress.some((p) => p.includes('medium concerns'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('stops at max rounds when audit always returns high concerns', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditHigh = '**Concern 1: Fundamental flaw**\n**Severity: high**\n\n**Verdict:** Needs revision.';
+
+    // 3 rounds max: draft, audit, revise, audit, revise, audit = 6 runtime calls
+    const responses: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      responses.push(i % 2 === 0 ? draftPlan : auditHigh);
+    }
+    const runtime = makeMockRuntime(responses);
+    const opts = await baseOpts(tmpDir, runtime, { maxAuditRounds: 3 });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.rounds).toBe(3);
+    expect(result.reachedMaxRounds).toBe(true);
+    expect(progress.some((p) => p.includes('Forge stopped after 3 audit rounds'))).toBe(true);
+  });
+
+  it('reports error when draft phase fails', async () => {
+    const tmpDir = await makeTmpDir();
+    const runtime = makeMockRuntimeWithError(0, []);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeDefined();
+    expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
+  });
+
+  it('reports error when audit phase fails but preserves draft', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    // Draft succeeds, audit errors
+    const runtime = makeMockRuntimeWithError(1, [draftPlan]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeDefined();
+    expect(result.planId).toMatch(/^plan-001$/);
+    expect(result.filePath).toBeTruthy();
+    expect(progress.some((p) => p.includes('Partial plan saved'))).toBe(true);
+  });
+
+  it('progress callback receives round numbers in format "Audit round N/M"', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(progress.some((p) => /Audit round 1\/5/.test(p))).toBe(true);
+  });
+
+  it('terminal messages pass force: true', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const calls: Array<{ msg: string; force?: boolean }> = [];
+    await orchestrator.run('Test', async (msg, optsArg) => {
+      calls.push({ msg, force: optsArg?.force });
+    });
+
+    const terminalCall = calls.find((c) => c.msg.includes('Forge complete'));
+    expect(terminalCall).toBeDefined();
+    expect(terminalCall!.force).toBe(true);
+  });
+
+  it('isRunning reflects orchestrator state', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    expect(orchestrator.isRunning).toBe(false);
+    const promise = orchestrator.run('Test', async () => {});
+    // isRunning is true during execution
+    expect(orchestrator.isRunning).toBe(true);
+    await promise;
+    expect(orchestrator.isRunning).toBe(false);
+  });
+
+  it('cancel stops the forge between phases', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test\n\n**ID:** (system)\n**Bead:** (system)\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditMedium = '**Concern 1: Issue**\n**Severity: medium**\n**Verdict:** Needs revision.';
+    const revisedPlan = draftPlan;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditMedium, revisedPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    // Cancel after the first audit
+    const result = await orchestrator.run('Test', async (msg) => {
+      progress.push(msg);
+      if (msg.includes('medium concerns')) {
+        orchestrator.requestCancel();
+      }
+    });
+
+    expect(result.finalVerdict).toBe('CANCELLED');
+    expect(result.rounds).toBeLessThanOrEqual(2);
+  });
+
+  it('concurrent forge throws error', async () => {
+    const tmpDir = await makeTmpDir();
+    // Use a runtime that returns slowly
+    let resolveFirst: () => void;
+    const firstCallDone = new Promise<void>((r) => { resolveFirst = r; });
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          // First call blocks until we resolve
+          await firstCallDone;
+          yield { type: 'text_final', text: '# Plan: Test\n' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    // Start first forge (will block)
+    const p1 = orchestrator.run('Test 1', async () => {});
+
+    // Try starting second forge
+    await expect(
+      orchestrator.run('Test 2', async () => {}),
+    ).rejects.toThrow('already running');
+
+    // Cleanup: let the first one finish (it'll error, which is fine)
+    resolveFirst!();
+    await p1.catch(() => {});
+  });
+});

@@ -1,0 +1,530 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import {
+  parsePlanCommand,
+  handlePlanCommand,
+  parsePlanFileHeader,
+  toSlug,
+} from './plan-commands.js';
+import type { PlanCommand, HandlePlanCommandOpts } from './plan-commands.js';
+
+// Mock the bd-cli module so we don't shell out to the real CLI.
+vi.mock('../beads/bd-cli.js', () => ({
+  bdCreate: vi.fn(async () => ({ id: 'ws-test-001', title: 'test', status: 'open' })),
+  bdClose: vi.fn(async () => {}),
+  bdUpdate: vi.fn(async () => {}),
+  bdAddLabel: vi.fn(async () => {}),
+}));
+
+import { bdCreate, bdClose, bdUpdate } from '../beads/bd-cli.js';
+
+async function makeTmpDir(): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), 'plan-commands-test-'));
+}
+
+function baseOpts(overrides: Partial<HandlePlanCommandOpts> = {}): HandlePlanCommandOpts {
+  return {
+    workspaceCwd: '/tmp/test-workspace',
+    beadsCwd: '/tmp/test-beads',
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// parsePlanCommand
+// ---------------------------------------------------------------------------
+
+describe('parsePlanCommand', () => {
+  it('returns null for non-plan messages', () => {
+    expect(parsePlanCommand('hello world')).toBeNull();
+    expect(parsePlanCommand('!memory show')).toBeNull();
+    expect(parsePlanCommand('')).toBeNull();
+    // Note: '!planning something' would match because it starts with '!plan'.
+    // This is fine — no other !plan* commands exist.
+  });
+
+  it('!plan with no args returns help', () => {
+    expect(parsePlanCommand('!plan')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('!plan with extra whitespace returns help', () => {
+    expect(parsePlanCommand('  !plan  ')).toEqual({ action: 'help', args: '' });
+  });
+
+  it('parses create from description text', () => {
+    expect(parsePlanCommand('!plan fix the login bug')).toEqual({
+      action: 'create',
+      args: 'fix the login bug',
+    });
+  });
+
+  it('parses list as reserved subcommand', () => {
+    expect(parsePlanCommand('!plan list')).toEqual({ action: 'list', args: '' });
+  });
+
+  it('"list" is reserved — "!plan list something" is not treated as create', () => {
+    expect(parsePlanCommand('!plan list something')).toEqual({
+      action: 'list',
+      args: 'something',
+    });
+  });
+
+  it('parses show with plan ID', () => {
+    expect(parsePlanCommand('!plan show plan-001')).toEqual({
+      action: 'show',
+      args: 'plan-001',
+    });
+  });
+
+  it('parses show with bead ID', () => {
+    expect(parsePlanCommand('!plan show ws-abc-123')).toEqual({
+      action: 'show',
+      args: 'ws-abc-123',
+    });
+  });
+
+  it('parses approve', () => {
+    expect(parsePlanCommand('!plan approve plan-001')).toEqual({
+      action: 'approve',
+      args: 'plan-001',
+    });
+  });
+
+  it('parses close', () => {
+    expect(parsePlanCommand('!plan close plan-001')).toEqual({
+      action: 'close',
+      args: 'plan-001',
+    });
+  });
+
+  it('parses help explicitly', () => {
+    expect(parsePlanCommand('!plan help')).toEqual({ action: 'help', args: '' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toSlug
+// ---------------------------------------------------------------------------
+
+describe('toSlug', () => {
+  it('converts to lowercase and replaces non-alphanumeric with hyphens', () => {
+    expect(toSlug('Fix the Login Bug')).toBe('fix-the-login-bug');
+  });
+
+  it('strips leading and trailing hyphens', () => {
+    expect(toSlug('---hello---')).toBe('hello');
+  });
+
+  it('truncates at 50 chars without trailing hyphen', () => {
+    const long = 'a'.repeat(60);
+    const slug = toSlug(long);
+    expect(slug.length).toBeLessThanOrEqual(50);
+    expect(slug.endsWith('-')).toBe(false);
+  });
+
+  it('handles special characters and Unicode', () => {
+    expect(toSlug('Add café support & résumé handling!')).toBe('add-caf-support-r-sum-handling');
+  });
+
+  it('handles empty string', () => {
+    expect(toSlug('')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePlanFileHeader
+// ---------------------------------------------------------------------------
+
+describe('parsePlanFileHeader', () => {
+  it('parses a well-formed plan header', () => {
+    const content = `# Plan: Add the plan command
+
+**ID:** plan-001
+**Bead:** ws-test-001
+**Created:** 2026-02-12
+**Status:** DRAFT
+**Project:** discoclaw
+`;
+    const header = parsePlanFileHeader(content);
+    expect(header).toEqual({
+      planId: 'plan-001',
+      beadId: 'ws-test-001',
+      status: 'DRAFT',
+      title: 'Add the plan command',
+      project: 'discoclaw',
+      created: '2026-02-12',
+    });
+  });
+
+  it('returns null when no ID field', () => {
+    expect(parsePlanFileHeader('# Just some file\n\nNo plan header.')).toBeNull();
+  });
+
+  it('handles missing optional fields', () => {
+    const content = `**ID:** plan-002\n`;
+    const header = parsePlanFileHeader(content);
+    expect(header).not.toBeNull();
+    expect(header!.planId).toBe('plan-002');
+    expect(header!.beadId).toBe('');
+    expect(header!.title).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handlePlanCommand
+// ---------------------------------------------------------------------------
+
+describe('handlePlanCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Reset the mock to return a fresh bead each time.
+    vi.mocked(bdCreate).mockResolvedValue({
+      id: 'ws-test-001',
+      title: 'test',
+      status: 'open',
+    });
+  });
+
+  it('help — returns usage text', async () => {
+    const result = await handlePlanCommand({ action: 'help', args: '' }, baseOpts());
+    expect(result).toContain('!plan commands');
+    expect(result).toContain('!plan list');
+    expect(result).toContain('!plan show');
+    expect(result).toContain('!plan approve');
+    expect(result).toContain('!plan close');
+  });
+
+  it('create — writes plan file and creates bead', async () => {
+    const tmpDir = await makeTmpDir();
+    const opts = baseOpts({ workspaceCwd: tmpDir });
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Add user authentication' },
+      opts,
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('ws-test-001');
+    expect(result).toContain('Add user authentication');
+
+    // Verify bead was created with plan label.
+    expect(bdCreate).toHaveBeenCalledWith(
+      { title: 'Add user authentication', labels: ['plan'] },
+      opts.beadsCwd,
+    );
+
+    // Verify file was written.
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    expect(planFile).toBeTruthy();
+
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('**ID:** plan-001');
+    expect(content).toContain('**Bead:** ws-test-001');
+    expect(content).toContain('**Status:** DRAFT');
+  });
+
+  it('create — increments plan number based on existing files', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    // Create a pre-existing plan file.
+    await fs.writeFile(
+      path.join(plansDir, 'plan-003-existing.md'),
+      '**ID:** plan-003\n**Status:** DONE\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'New feature' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('plan-004');
+  });
+
+  it('create — sanitizes and truncates slug', async () => {
+    const tmpDir = await makeTmpDir();
+
+    await handlePlanCommand(
+      { action: 'create', args: 'This is a very long description that should be truncated to fifty characters maximum for the filename' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    expect(planFile).toBeTruthy();
+    // Slug portion (after plan-001-) should be <= 50 chars.
+    const slug = planFile!.replace(/^plan-\d+-/, '').replace(/\.md$/, '');
+    expect(slug.length).toBeLessThanOrEqual(50);
+  });
+
+  it('create — returns error when no description', async () => {
+    const result = await handlePlanCommand(
+      { action: 'create', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage');
+  });
+
+  it('create — handles bdCreate failure gracefully', async () => {
+    vi.mocked(bdCreate).mockRejectedValueOnce(new Error('bd not found'));
+    const tmpDir = await makeTmpDir();
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Something' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('Failed to create backing bead');
+  });
+
+  it('create — uses fallback template when .plan-template.md is missing', async () => {
+    const tmpDir = await makeTmpDir();
+    // No template file in plansDir — should use fallback.
+
+    const result = await handlePlanCommand(
+      { action: 'create', args: 'Test fallback' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('plan-001');
+    const plansDir = path.join(tmpDir, 'plans');
+    const files = await fs.readdir(plansDir);
+    const planFile = files.find((f) => f.startsWith('plan-001'));
+    const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+    expect(content).toContain('## Objective');
+    expect(content).toContain('**Status:** DRAFT');
+  });
+
+  it('create — creates plans dir when missing', async () => {
+    const tmpDir = await makeTmpDir();
+    // Don't create plansDir — handlePlanCommand should create it.
+
+    await handlePlanCommand(
+      { action: 'create', args: 'First plan ever' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    const plansDir = path.join(tmpDir, 'plans');
+    const stat = await fs.stat(plansDir);
+    expect(stat.isDirectory()).toBe(true);
+  });
+
+  it('list — shows active plans as bullet list', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-alpha.md'),
+      '# Plan: Alpha\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+    await fs.writeFile(
+      path.join(plansDir, 'plan-002-beta.md'),
+      '# Plan: Beta\n\n**ID:** plan-002\n**Bead:** ws-002\n**Status:** APPROVED\n**Project:** test\n**Created:** 2026-01-02\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'list', args: '' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('DRAFT');
+    expect(result).toContain('Alpha');
+    expect(result).toContain('plan-002');
+    expect(result).toContain('APPROVED');
+    expect(result).toContain('Beta');
+  });
+
+  it('list — returns message when no plans', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanCommand(
+      { action: 'list', args: '' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toBe('No plans found.');
+  });
+
+  it('list — returns message when plans dir missing', async () => {
+    const tmpDir = await makeTmpDir();
+
+    const result = await handlePlanCommand(
+      { action: 'list', args: '' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toBe('No plans directory found.');
+  });
+
+  it('show — finds plan by plan ID', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      [
+        '# Plan: Test feature',
+        '',
+        '**ID:** plan-001',
+        '**Bead:** ws-001',
+        '**Status:** DRAFT',
+        '**Project:** discoclaw',
+        '**Created:** 2026-02-12',
+        '',
+        '---',
+        '',
+        '## Objective',
+        '',
+        'Build the test feature for plan commands.',
+        '',
+        '## Audit Log',
+        '',
+        '### Review 1',
+        '',
+        '#### Verdict',
+        '',
+        '**Ready with minor revisions.**',
+        '',
+        '---',
+      ].join('\n'),
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('Test feature');
+    expect(result).toContain('DRAFT');
+    expect(result).toContain('Build the test feature');
+    expect(result).toContain('Ready with minor revisions');
+  });
+
+  it('show — finds plan by bead ID', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    await fs.writeFile(
+      path.join(plansDir, 'plan-001-test.md'),
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-abc-123\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n\n---\n\n## Objective\n\nSome objective.\n\n## Risks\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'ws-abc-123' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('plan-001');
+    expect(result).toContain('ws-abc-123');
+  });
+
+  it('show — returns not found for unknown ID', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanCommand(
+      { action: 'show', args: 'plan-999' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toContain('Plan not found');
+  });
+
+  it('show — returns usage when no args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'show', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage');
+  });
+
+  it('approve — updates status to APPROVED and bead to in_progress', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const filePath = path.join(plansDir, 'plan-001-test.md');
+    await fs.writeFile(
+      filePath,
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** DRAFT\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'approve', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('approved');
+
+    // Verify file was updated.
+    const content = await fs.readFile(filePath, 'utf-8');
+    expect(content).toContain('**Status:** APPROVED');
+    expect(content).not.toContain('**Status:** DRAFT');
+
+    // Verify bead was updated.
+    expect(bdUpdate).toHaveBeenCalledWith('ws-001', { status: 'in_progress' }, expect.any(String));
+  });
+
+  it('approve — returns usage when no args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'approve', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage');
+  });
+
+  it('close — updates status to CLOSED and closes bead', async () => {
+    const tmpDir = await makeTmpDir();
+    const plansDir = path.join(tmpDir, 'plans');
+    await fs.mkdir(plansDir, { recursive: true });
+
+    const filePath = path.join(plansDir, 'plan-001-test.md');
+    await fs.writeFile(
+      filePath,
+      '# Plan: Test\n\n**ID:** plan-001\n**Bead:** ws-001\n**Status:** IMPLEMENTING\n**Project:** test\n**Created:** 2026-01-01\n',
+    );
+
+    const result = await handlePlanCommand(
+      { action: 'close', args: 'plan-001' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+
+    expect(result).toContain('closed');
+
+    // Verify file was updated.
+    const content = await fs.readFile(filePath, 'utf-8');
+    expect(content).toContain('**Status:** CLOSED');
+
+    // Verify bead was closed.
+    expect(bdClose).toHaveBeenCalledWith('ws-001', 'Plan closed', expect.any(String));
+  });
+
+  it('close — returns usage when no args', async () => {
+    const result = await handlePlanCommand(
+      { action: 'close', args: '' },
+      baseOpts(),
+    );
+    expect(result).toContain('Usage');
+  });
+
+  it('close — returns not found for unknown ID', async () => {
+    const tmpDir = await makeTmpDir();
+    await fs.mkdir(path.join(tmpDir, 'plans'), { recursive: true });
+
+    const result = await handlePlanCommand(
+      { action: 'close', args: 'plan-999' },
+      baseOpts({ workspaceCwd: tmpDir }),
+    );
+    expect(result).toContain('Plan not found');
+  });
+});

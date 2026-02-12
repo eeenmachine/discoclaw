@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ActivityType, Client, GatewayIntentBits, Partials } from 'discord.js';
 import type { PresenceData } from 'discord.js';
 import type { RuntimeAdapter, ImageData } from './runtime/types.js';
+import { MAX_IMAGES_PER_INVOCATION } from './runtime/types.js';
 import type { SessionManager } from './sessions.js';
 import { isAllowlisted } from './discord/allowlist.js';
 import { KeyedQueue } from './group-queue.js';
@@ -19,6 +20,9 @@ import { ACTIVITY_TYPE_MAP } from './discord/actions-bot-profile.js';
 import { fetchMessageHistory } from './discord/message-history.js';
 import { loadSummary, saveSummary, generateSummary } from './discord/summarizer.js';
 import { parseMemoryCommand, handleMemoryCommand } from './discord/memory-commands.js';
+import { parsePlanCommand, handlePlanCommand } from './discord/plan-commands.js';
+import { parseForgeCommand, ForgeOrchestrator } from './discord/forge-commands.js';
+import type { ForgeOrchestratorOpts } from './discord/forge-commands.js';
 import { applyUserTurnToDurable } from './discord/user-turn-to-durable.js';
 import type { StatusPoster } from './discord/status-channel.js';
 import { createStatusPoster } from './discord/status-channel.js';
@@ -32,7 +36,9 @@ import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 import { buildContextFiles, inlineContextFiles, buildDurableMemorySection, buildShortTermMemorySection, buildBeadThreadSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools } from './discord/prompt-common.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './discord/shortterm-memory.js';
 import { editThenSendChunks } from './discord/output-common.js';
-import { downloadMessageImages } from './discord/image-download.js';
+import { downloadMessageImages, resolveMediaType } from './discord/image-download.js';
+import { resolveReplyReference } from './discord/reply-reference.js';
+import { downloadTextAttachments } from './discord/file-download.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './discord/user-errors.js';
 import { parseHealthCommand, renderHealthReport, renderHealthToolsReport } from './discord/health-command.js';
 import type { HealthConfigSnapshot } from './discord/health-command.js';
@@ -88,6 +94,13 @@ export type BotParams = {
   durableInjectMaxChars: number;
   durableMaxItems: number;
   memoryCommandsEnabled: boolean;
+  planCommandsEnabled?: boolean;
+  forgeCommandsEnabled?: boolean;
+  forgeMaxAuditRounds?: number;
+  forgeDrafterModel?: string;
+  forgeAuditorModel?: string;
+  forgeTimeoutMs?: number;
+  forgeProgressThrottleMs?: number;
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
   shortTermDataDir: string;
@@ -152,6 +165,9 @@ export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail
 export type StatusRef = { current: StatusPoster | null };
 
 export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, queue: QueueLike, statusRef?: StatusRef) {
+  // Global forge orchestrator — one forge at a time across all channels.
+  let forgeOrchestrator: ForgeOrchestrator | null = null;
+
   return async (msg: any) => {
     try {
       if (!msg?.author || msg.author.bot) return;
@@ -303,6 +319,139 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
+          // Handle !plan commands before session creation.
+          if (params.planCommandsEnabled) {
+            const planCmd = parsePlanCommand(String(msg.content ?? ''));
+            if (planCmd) {
+              const response = await handlePlanCommand(planCmd, {
+                workspaceCwd: params.workspaceCwd,
+                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+              });
+              await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Handle !forge commands — long-running, async plan creation.
+          if (params.forgeCommandsEnabled) {
+            const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
+            if (forgeCmd) {
+              if (forgeCmd.action === 'help') {
+                await msg.reply({
+                  content: [
+                    '**!forge commands:**',
+                    '- `!forge <description>` — auto-draft and audit a plan',
+                    '- `!forge status` — check if a forge is running',
+                    '- `!forge cancel` — cancel the running forge',
+                  ].join('\n'),
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              if (forgeCmd.action === 'status') {
+                const running = forgeOrchestrator?.isRunning ?? false;
+                await msg.reply({
+                  content: running ? 'A forge is currently running.' : 'No forge running.',
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              if (forgeCmd.action === 'cancel') {
+                if (forgeOrchestrator?.isRunning) {
+                  forgeOrchestrator.requestCancel();
+                  await msg.reply({ content: 'Forge cancel requested.', allowedMentions: NO_MENTIONS });
+                } else {
+                  await msg.reply({ content: 'No forge running to cancel.', allowedMentions: NO_MENTIONS });
+                }
+                return;
+              }
+
+              // action === 'create'
+              if (forgeOrchestrator?.isRunning) {
+                await msg.reply({
+                  content: 'A forge is already running. Use `!forge cancel` to stop it first.',
+                  allowedMentions: NO_MENTIONS,
+                });
+                return;
+              }
+
+              const plansDir = path.join(params.workspaceCwd, 'plans');
+              forgeOrchestrator = new ForgeOrchestrator({
+                runtime: params.runtime,
+                model: params.runtimeModel,
+                cwd: params.workspaceCwd,
+                workspaceCwd: params.workspaceCwd,
+                beadsCwd: params.beadCtx?.beadsCwd ?? params.workspaceCwd,
+                plansDir,
+                maxAuditRounds: params.forgeMaxAuditRounds ?? 5,
+                progressThrottleMs: params.forgeProgressThrottleMs ?? 3000,
+                timeoutMs: params.forgeTimeoutMs ?? 5 * 60_000,
+                drafterModel: params.forgeDrafterModel,
+                auditorModel: params.forgeAuditorModel,
+                log: params.log,
+              });
+
+              // Send initial progress message
+              const progressReply = await msg.reply({
+                content: `Starting forge: ${forgeCmd.args}`,
+                allowedMentions: NO_MENTIONS,
+              });
+
+              // Throttle state for progress edits
+              let lastEditAt = 0;
+              const throttleMs = params.forgeProgressThrottleMs ?? 3000;
+              let progressMessageGone = false;
+
+              const onProgress = async (progressMsg: string, opts?: { force?: boolean }) => {
+                if (progressMessageGone) return;
+                const now = Date.now();
+                if (!opts?.force && now - lastEditAt < throttleMs) return;
+                lastEditAt = now;
+                try {
+                  await progressReply.edit({ content: progressMsg, allowedMentions: NO_MENTIONS });
+                } catch (editErr: any) {
+                  if (editErr?.code === 10008) {
+                    progressMessageGone = true;
+                  }
+                }
+              };
+
+              // Run forge in the background — don't block the queue
+              // eslint-disable-next-line @typescript-eslint/no-floating-promises
+              forgeOrchestrator.run(forgeCmd.args, onProgress).then(
+                async (result) => {
+                  if (progressMessageGone) {
+                    try {
+                      const summary = result.error
+                        ? `Forge failed: ${result.error}`
+                        : `Forge complete. Plan **${result.planId}** ready for review (${result.rounds} round${result.rounds > 1 ? 's' : ''}). Use \`!plan show ${result.planId}\` to view.`;
+                      await msg.channel.send({ content: summary, allowedMentions: NO_MENTIONS });
+                    } catch {
+                      // best-effort
+                    }
+                  }
+                },
+                async (err) => {
+                  params.log?.error({ err }, 'forge:unhandled error');
+                  try {
+                    const errMsg = `Forge crashed: ${String(err)}`;
+                    if (progressMessageGone) {
+                      await msg.channel.send({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    } else {
+                      await progressReply.edit({ content: errMsg, allowedMentions: NO_MENTIONS });
+                    }
+                  } catch {
+                    // best-effort
+                  }
+                },
+              );
+
+              return;
+            }
+          }
+
           const sessionId = params.useRuntimeSessions
             ? await params.sessionManager.getOrCreate(sessionKey)
             : null;
@@ -402,7 +551,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
-          const [durableSection, shortTermSection, beadSection] = await Promise.all([
+          const [durableSection, shortTermSection, beadSection, replyRef] = await Promise.all([
             buildDurableMemorySection({
               enabled: params.durableMemoryEnabled,
               durableDataDir: params.durableDataDir,
@@ -426,6 +575,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               beadCtx: params.beadCtx,
               log: params.log,
             }),
+            resolveReplyReference(msg, params.botDisplayName, params.log),
           ]);
 
           const inlinedContext = await inlineContextFiles(
@@ -451,6 +601,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               : '') +
             (historySection
               ? `---\nRecent conversation:\n${historySection}\n\n`
+              : '') +
+            (replyRef
+              ? `---\nReplied-to message:\n${replyRef.section}\n\n`
               : '') +
             `---\nUser message:\n` +
             String(msg.content ?? '');
@@ -489,13 +642,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
-          // Download image attachments from the user message.
+          // Collect images from reply reference (downloaded first, takes priority).
           let inputImages: ImageData[] | undefined;
+          const replyRefImageCount = replyRef?.images.length ?? 0;
+          if (replyRefImageCount > 0) {
+            inputImages = [...replyRef!.images];
+            params.log?.info({ imageCount: replyRefImageCount }, 'discord:reply-ref images downloaded');
+          }
+
+          // Download image attachments from the user message (remaining budget).
           if (msg.attachments && msg.attachments.size > 0) {
             try {
-              const dlResult = await downloadMessageImages([...msg.attachments.values()]);
+              const dlResult = await downloadMessageImages(
+                [...msg.attachments.values()],
+                MAX_IMAGES_PER_INVOCATION - replyRefImageCount,
+              );
               if (dlResult.images.length > 0) {
-                inputImages = dlResult.images;
+                inputImages = [...(inputImages ?? []), ...dlResult.images];
                 params.log?.info({ imageCount: dlResult.images.length }, 'discord:images downloaded');
               }
               if (dlResult.errors.length > 0) {
@@ -505,6 +668,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
             } catch (err) {
               params.log?.warn({ err }, 'discord:image download failed');
+            }
+
+            // Download non-image text attachments.
+            try {
+              const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
+              if (nonImageAtts.length > 0) {
+                const textResult = await downloadTextAttachments(nonImageAtts);
+                if (textResult.texts.length > 0) {
+                  const sections = textResult.texts.map(t => `[Attached file: ${t.name}]\n\`\`\`\n${t.content}\n\`\`\``);
+                  prompt += '\n\n' + sections.join('\n\n');
+                  params.log?.info({ fileCount: textResult.texts.length }, 'discord:text attachments downloaded');
+                }
+                if (textResult.errors.length > 0) {
+                  prompt += '\n(' + textResult.errors.join('; ') + ')';
+                  params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
+                }
+              }
+            } catch (err) {
+              params.log?.warn({ err }, 'discord:text attachment download failed');
             }
           }
 
