@@ -46,6 +46,16 @@ describe('extractEnvVarNames', () => {
     const result = extractEnvVarNames('lowercase_key=value');
     expect(result).toEqual(new Set());
   });
+
+  it('ignores mixed-case keys', () => {
+    const result = extractEnvVarNames('Discord_Token=abc');
+    expect(result).toEqual(new Set());
+  });
+
+  it('ignores keys starting with a digit', () => {
+    const result = extractEnvVarNames('2FA_SECRET=value');
+    expect(result).toEqual(new Set());
+  });
 });
 
 describe('missingEnvVars', () => {
